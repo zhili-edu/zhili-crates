@@ -1,0 +1,8 @@
+[workspace]
+resolver = "3"
+members = ["kufang"]
+
+[workspace.dependencies]
+sea-orm-migration = { version = "~2.0.0-rc", features = [ "runtime-tokio-rustls", "sqlx-postgres" ] }
+async-trait = "0.1.89"
+tokio = { version = "1", features = ["macros", "rt", "rt-multi-thread"] }
