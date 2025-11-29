@@ -1,13 +1,14 @@
+use http::HeaderValue;
 use regex::{Captures, Regex};
 use rsa::{RsaPublicKey, pkcs1v15, pkcs8::DecodePublicKey as _, signature::Verifier as _};
 use s3::{PostPolicy, PostPolicyField, PostPolicyValue};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use uuid::Uuid;
 
 use crate::Kufang;
 
-#[derive(Debug)]
+#[derive(Debug, Serialize)]
 pub struct PostObjectUrl {
     pub url: String,
     pub fields: Vec<(String, String)>,
@@ -65,12 +66,12 @@ impl Kufang {
 
     pub async fn handle_post_object_callback(
         &self,
-        pub_key_header: &str,
-        auth_header: &str,
+        pub_key_header: &HeaderValue,
+        auth_header: &HeaderValue,
         path: &str,
         query: &str,
         body: &str,
-    ) {
+    ) -> Uuid {
         if verify_callback(pub_key_header, auth_header, path, query, body)
             .await
             .is_err()
@@ -111,6 +112,8 @@ impl Kufang {
         .execute(&self.pool)
         .await
         .unwrap();
+
+        body.file_id
     }
 }
 
@@ -145,8 +148,8 @@ fn get_post_object_callback(url: &str, body: Option<Vec<(&str, serde_json::Value
 }
 
 async fn verify_callback(
-    pub_key_header: &str,
-    auth_header: &str,
+    pub_key_header: &HeaderValue,
+    auth_header: &HeaderValue,
     path: &str,
     query: &str,
     body: &str,

@@ -1,6 +1,5 @@
 use md5::{Digest, Md5};
-use sqlx::{PgPool, query};
-use std::sync::Arc;
+use std::{collections::HashMap, sync::Arc};
 use uuid::Uuid;
 
 use s3::Bucket;
@@ -14,7 +13,7 @@ pub use post::PostObjectUrl;
 #[derive(Clone)]
 pub struct Kufang {
     bucket: Arc<Bucket>,
-    pool: PgPool,
+    pool: sqlx::PgPool,
     s3_key_prefix: Arc<str>,
 }
 
@@ -45,10 +44,12 @@ impl Kufang {
         )
     }
 
-    pub async fn upload_file(&self, file: &[u8], mime: &str, public: bool) {
+    pub async fn upload_file(&self, file: &[u8], mime: &str, public: bool) -> Uuid {
         let id = Uuid::now_v7();
 
         self.upload_file_with_id(id, file, mime, public).await;
+
+        id
     }
 
     pub async fn upload_file_with_id(&self, id: Uuid, file: &[u8], mime: &str, public: bool) {
@@ -61,7 +62,7 @@ impl Kufang {
             .await
             .unwrap();
 
-        query(
+        sqlx::query(
             "
             INSERT INTO kufang.files (id, s3_key, size, md5, mime, ref_count, public)
             VALUES ($1, $2, $3, $4, $5, 0, $6)
@@ -76,5 +77,29 @@ impl Kufang {
         .execute(&self.pool)
         .await
         .unwrap();
+    }
+
+    pub async fn get_file_s3_key(&self, id: Uuid) -> Result<Option<String>, sqlx::Error> {
+        sqlx::query_scalar::<_, String>("SELECT s3_key FROM kufang.files WHERE id = $1")
+            .bind(id)
+            .fetch_optional(&self.pool)
+            .await
+    }
+
+    pub async fn get_s3_key_map(&self, ids: &[Uuid]) -> Result<HashMap<Uuid, String>, sqlx::Error> {
+        sqlx::query_as::<_, (Uuid, String)>(
+            "SELECT id, s3_key FROM kufang.files WHERE id = ANY($1::uuid[])",
+        )
+        .bind(ids)
+        .fetch_all(&self.pool)
+        .await
+        .map(|r| r.into_iter().collect::<HashMap<_, _>>())
+    }
+
+    pub async fn get_file_id_by_md5(&self, md5: &[u8]) -> Result<Option<Uuid>, sqlx::Error> {
+        sqlx::query_scalar::<_, Uuid>("SELECT id FROM kufang.files WHERE md5 = $1")
+            .bind(md5)
+            .fetch_optional(&self.pool)
+            .await
     }
 }
