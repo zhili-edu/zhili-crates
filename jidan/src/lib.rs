@@ -141,6 +141,8 @@ pub struct CreateOrder {
 
     pub payment_fee: Option<i64>,
     pub discount_amount: Option<i64>,
+
+    pub extra_info: Option<serde_json::Value>,
 }
 
 pub struct CreateOrderItem {
@@ -215,12 +217,14 @@ impl OrderService {
             INSERT INTO jidan.orders (
                 id, user_id, channel, channel_no, status,
                 total_items_amount, payment_fee, discount_amount,
-                payable_amount
+                payable_amount,
+                extra_info
             )
             VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8,
-                $9
+                $9,
+                $10
             )
             "#,
         )
@@ -233,6 +237,7 @@ impl OrderService {
         .bind(payment_fee)
         .bind(discount_amount)
         .bind(payable_amount)
+        .bind(info.extra_info)
         .execute(&mut **tx)
         .await?;
 
