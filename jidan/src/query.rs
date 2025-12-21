@@ -1,5 +1,6 @@
 use std::collections::HashMap;
 
+use serde_json::Value;
 use sqlx::{Postgres, QueryBuilder, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -14,6 +15,7 @@ pub struct OrderQuery<'a> {
     pub created_after: Option<OffsetDateTime>,
     pub created_before: Option<OffsetDateTime>,
     pub has_items: Option<&'a [Uuid]>,
+    pub extra_info: Option<&'a Value>,
     pub offset: i64,
     pub limit: Option<i64>,
 }
@@ -27,6 +29,7 @@ impl Default for OrderQuery<'_> {
             created_after: None,
             created_before: None,
             has_items: None,
+            extra_info: None,
             offset: 0,
             limit: Some(20),
         }
@@ -65,6 +68,11 @@ impl<'a> OrderQuery<'a> {
 
     pub fn has_items(mut self, items: &'a [Uuid]) -> Self {
         self.has_items = Some(items);
+        self
+    }
+
+    pub fn extra_info(mut self, extra_info: &'a Value) -> Self {
+        self.extra_info = Some(extra_info);
         self
     }
 
@@ -112,6 +120,10 @@ fn apply_filters<'a>(builder: &mut QueryBuilder<'a, Postgres>, query: &'a OrderQ
         builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE item_id = ANY(");
         builder.push_bind(items);
         builder.push("))");
+    }
+    if let Some(info) = query.extra_info {
+        builder.push(" AND extra_info @> ");
+        builder.push_bind(info);
     }
 }
 
@@ -495,5 +507,23 @@ impl OrderService {
         .bind(item_ids)
         .fetch_all(&self.pool)
         .await
+    }
+
+    pub async fn find_all_by_extra_info(
+        &self,
+        extra_info: &Value,
+    ) -> Result<Vec<OrderDetail>, sqlx::Error> {
+        self.query_orders_with_details(OrderQuery::new().extra_info(extra_info).limit(None))
+            .await
+    }
+
+    pub async fn find_optional_by_extra_info(
+        &self,
+        extra_info: &Value,
+    ) -> Result<Option<OrderDetail>, sqlx::Error> {
+        let mut orders = self
+            .query_orders_with_details(OrderQuery::new().extra_info(extra_info).limit(Some(1)))
+            .await?;
+        Ok(orders.pop())
     }
 }

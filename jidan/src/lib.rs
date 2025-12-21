@@ -485,4 +485,40 @@ impl OrderService {
 
         Ok(())
     }
+
+    pub async fn close_order(
+        &self,
+        order_id: Uuid,
+        extra_info_patch: Option<serde_json::Value>,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), sqlx::Error> {
+        if let Some(patch) = extra_info_patch {
+            sqlx::query(
+                r#"
+                UPDATE jidan.orders
+                SET status = $1, updated_at = now(), extra_info = COALESCE(extra_info, '{}'::jsonb) || $2
+                WHERE id = $3
+                "#,
+            )
+            .bind(OrderStatus::Closed)
+            .bind(patch)
+            .bind(order_id)
+            .execute(&mut **tx)
+            .await?;
+        } else {
+            sqlx::query(
+                r#"
+                UPDATE jidan.orders
+                SET status = $1, updated_at = now()
+                WHERE id = $2
+                "#,
+            )
+            .bind(OrderStatus::Closed)
+            .bind(order_id)
+            .execute(&mut **tx)
+            .await?;
+        }
+
+        Ok(())
+    }
 }
