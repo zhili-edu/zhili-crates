@@ -152,6 +152,8 @@ pub struct CreateOrderItem {
     pub original_price: i64,
     pub unit_price: i64,
     pub real_amount: i64,
+
+    pub extra_info: Option<serde_json::Value>,
 }
 
 #[derive(Debug, Clone)]
@@ -246,21 +248,23 @@ impl OrderService {
         let original_price: Vec<i64> = info.items.iter().map(|i| i.original_price).collect();
         let unit_price: Vec<i64> = info.items.iter().map(|i| i.unit_price).collect();
         let real_amount: Vec<i64> = info.items.iter().map(|i| i.real_amount).collect();
+        let extra_info: Vec<Option<Value>> =
+            info.items.iter().map(|i| i.extra_info.clone()).collect();
 
         sqlx::query(
             r#"
             WITH new_items AS (
                 SELECT *
-                FROM UNNEST($2, $3, $4, $5, $6)
-                    AS t (item_id, item_type, original_price, unit_price, real_amount)
+                FROM UNNEST($2, $3, $4, $5, $6, $7)
+                    AS t (item_id, item_type, original_price, unit_price, real_amount, extra_info)
             )
             INSERT INTO jidan.order_items (
                 order_id, item_id, item_type,
-                original_price, unit_price, real_amount
+                original_price, unit_price, real_amount, extra_info
             )
             SELECT
                 $1 AS order_id,
-                item_id, item_type, original_price, unit_price, real_amount
+                item_id, item_type, original_price, unit_price, real_amount, extra_info
             FROM new_items
             "#,
         )
@@ -270,6 +274,7 @@ impl OrderService {
         .bind(original_price)
         .bind(unit_price)
         .bind(real_amount)
+        .bind(extra_info)
         .execute(&mut **tx)
         .await?;
 
