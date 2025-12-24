@@ -27,6 +27,7 @@ pub struct OrderSummary {
 
 #[derive(Debug, FromRow, Clone)]
 pub struct OrderItemDetail {
+    pub id: Uuid,
     pub item_id: Uuid,
     pub item_type: String,
     pub original_price: i64,
@@ -523,6 +524,48 @@ impl OrderService {
             .execute(&mut **tx)
             .await?;
         }
+
+        Ok(())
+    }
+
+    pub async fn update_order_extra_info(
+        &self,
+        order_id: Uuid,
+        extra_info: serde_json::Value,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE jidan.orders
+            SET updated_at = now(), extra_info = COALESCE(extra_info, '{}'::jsonb) || $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(extra_info)
+        .bind(order_id)
+        .execute(&mut **tx)
+        .await?;
+
+        Ok(())
+    }
+
+    pub async fn update_order_item_extra_info(
+        &self,
+        order_item_id: Uuid,
+        extra_info: serde_json::Value,
+        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+    ) -> Result<(), sqlx::Error> {
+        sqlx::query(
+            r#"
+            UPDATE jidan.order_items
+            SET extra_info = COALESCE(extra_info, '{}'::jsonb) || $1
+            WHERE id = $2
+            "#,
+        )
+        .bind(extra_info)
+        .bind(order_item_id)
+        .execute(&mut **tx)
+        .await?;
 
         Ok(())
     }

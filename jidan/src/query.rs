@@ -16,6 +16,7 @@ pub struct OrderQuery<'a> {
     pub created_before: Option<OffsetDateTime>,
     pub has_items: Option<&'a [Uuid]>,
     pub extra_info: Option<&'a Value>,
+    pub item_extra_info: Option<&'a Value>,
     pub offset: i64,
     pub limit: Option<i64>,
 }
@@ -30,6 +31,7 @@ impl Default for OrderQuery<'_> {
             created_before: None,
             has_items: None,
             extra_info: None,
+            item_extra_info: None,
             offset: 0,
             limit: Some(20),
         }
@@ -73,6 +75,11 @@ impl<'a> OrderQuery<'a> {
 
     pub fn extra_info(mut self, extra_info: &'a Value) -> Self {
         self.extra_info = Some(extra_info);
+        self
+    }
+
+    pub fn item_extra_info(mut self, item_extra_info: &'a Value) -> Self {
+        self.item_extra_info = Some(item_extra_info);
         self
     }
 
@@ -124,6 +131,11 @@ fn apply_filters<'a>(builder: &mut QueryBuilder<'a, Postgres>, query: &'a OrderQ
     if let Some(info) = query.extra_info {
         builder.push(" AND extra_info @> ");
         builder.push_bind(info);
+    }
+    if let Some(item_info) = query.item_extra_info {
+        builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE extra_info @> ");
+        builder.push_bind(item_info);
+        builder.push(")");
     }
 }
 
@@ -219,7 +231,7 @@ impl OrderService {
         for row in items_rows {
             let order_id: Uuid = row.get("order_id");
             let item = OrderItemDetail {
-                // id: row.get("id"),
+                id: row.get("id"),
                 item_id: row.get("item_id"),
                 item_type: row.get("item_type"),
                 original_price: row.get("original_price"),
@@ -525,5 +537,17 @@ impl OrderService {
             .query_orders_with_details(OrderQuery::new().extra_info(extra_info).limit(Some(1)))
             .await?;
         Ok(orders.pop())
+    }
+
+    pub async fn find_orders_by_item_extra_info_contains_any(
+        &self,
+        item_extra_info: &Value,
+    ) -> Result<Vec<OrderDetail>, sqlx::Error> {
+        self.query_orders_with_details(
+            OrderQuery::new()
+                .item_extra_info(item_extra_info)
+                .limit(None),
+        )
+        .await
     }
 }
