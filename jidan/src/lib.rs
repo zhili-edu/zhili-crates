@@ -1,6 +1,6 @@
 use serde::Serialize;
 use serde_json::Value;
-use sqlx::FromRow;
+use sqlx::{FromRow, PgConnection};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
@@ -207,7 +207,7 @@ impl OrderService {
         &self,
         order_id: Uuid,
         info: CreateOrder,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         let total_items_amount: i64 = info.items.iter().map(|i| i.unit_price).sum();
         let payment_fee: i64 = info.payment_fee.unwrap_or(0);
@@ -241,7 +241,7 @@ impl OrderService {
         .bind(discount_amount)
         .bind(payable_amount)
         .bind(info.extra_info)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await?;
 
         let item_type: Vec<String> = info.items.iter().map(|i| i.item_type.clone()).collect();
@@ -276,20 +276,16 @@ impl OrderService {
         .bind(unit_price)
         .bind(real_amount)
         .bind(extra_info)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
     }
 
-    pub async fn create_order(
-        &self,
-        info: CreateOrder,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> Uuid {
+    pub async fn create_order(&self, info: CreateOrder, conn: &mut PgConnection) -> Uuid {
         let id = Uuid::now_v7();
 
-        self.create_order_with_id(id, info, tx).await;
+        self.create_order_with_id(id, info, conn).await;
 
         id
     }
@@ -298,7 +294,7 @@ impl OrderService {
     pub async fn fulfill_order(
         &self,
         order_id: Uuid,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -309,7 +305,7 @@ impl OrderService {
         )
         .bind(OrderStatus::Fulfilled)
         .bind(order_id)
-        .execute(&mut **tx)
+        .execute(conn)
         .await?;
 
         Ok(())
@@ -322,7 +318,7 @@ impl OrderService {
         &self,
         order_id: Uuid,
         payment_amount: i64,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> PaymentResult {
         let (current_status, current_paid_amount, payable_amount): (OrderStatus, i64, i64) =
             sqlx::query_as(
@@ -333,7 +329,7 @@ impl OrderService {
                 "#,
             )
             .bind(order_id)
-            .fetch_one(&mut **tx)
+            .fetch_one(&mut *conn)
             .await
             .unwrap();
 
@@ -361,7 +357,7 @@ impl OrderService {
         .bind(new_status)
         .bind(new_paid_amount)
         .bind(order_id)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await
         .unwrap();
 
@@ -380,7 +376,7 @@ impl OrderService {
         &self,
         order_id: Uuid,
         refund_amount: i64,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> RefundResult {
         let (current_status, paid_amount, current_refunded_amount): (OrderStatus, i64, i64) =
             sqlx::query_as(
@@ -391,7 +387,7 @@ impl OrderService {
                 "#,
             )
             .bind(order_id)
-            .fetch_one(&mut **tx)
+            .fetch_one(&mut *conn)
             .await
             .unwrap();
 
@@ -415,7 +411,7 @@ impl OrderService {
         .bind(new_status)
         .bind(new_refunded_amount)
         .bind(order_id)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await
         .unwrap();
 
@@ -431,10 +427,7 @@ impl OrderService {
     /// 扫描并取消所有已过期的订单 (expire_at < now)
     /// 仅针对 Pending 状态的订单生效
     /// 返回修改的订单数
-    pub async fn cancel_expired_orders(
-        &self,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
-    ) -> u64 {
+    pub async fn cancel_expired_orders(&self, conn: &mut PgConnection) -> u64 {
         let result = sqlx::query(
             r#"
             UPDATE jidan.orders
@@ -447,7 +440,7 @@ impl OrderService {
         )
         .bind(OrderStatus::Canceled)
         .bind(OrderStatus::Pending)
-        .execute(&mut **tx)
+        .execute(conn)
         .await
         .unwrap();
 
@@ -459,7 +452,7 @@ impl OrderService {
     pub async fn complete_order(
         &self,
         order_id: Uuid,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         let current_status: OrderStatus = sqlx::query_scalar(
             r#"
@@ -469,7 +462,7 @@ impl OrderService {
             "#,
         )
         .bind(order_id)
-        .fetch_one(&mut **tx)
+        .fetch_one(&mut *conn)
         .await?;
 
         match current_status {
@@ -486,7 +479,7 @@ impl OrderService {
         )
         .bind(OrderStatus::Completed)
         .bind(order_id)
-        .execute(&mut **tx)
+        .execute(&mut *conn)
         .await?;
 
         Ok(())
@@ -496,7 +489,7 @@ impl OrderService {
         &self,
         order_id: Uuid,
         extra_info_patch: Option<serde_json::Value>,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         if let Some(patch) = extra_info_patch {
             sqlx::query(
@@ -509,7 +502,7 @@ impl OrderService {
             .bind(OrderStatus::Closed)
             .bind(patch)
             .bind(order_id)
-            .execute(&mut **tx)
+            .execute(&mut *conn)
             .await?;
         } else {
             sqlx::query(
@@ -521,7 +514,7 @@ impl OrderService {
             )
             .bind(OrderStatus::Closed)
             .bind(order_id)
-            .execute(&mut **tx)
+            .execute(&mut *conn)
             .await?;
         }
 
@@ -532,7 +525,7 @@ impl OrderService {
         &self,
         order_id: Uuid,
         extra_info: serde_json::Value,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -543,7 +536,7 @@ impl OrderService {
         )
         .bind(extra_info)
         .bind(order_id)
-        .execute(&mut **tx)
+        .execute(conn)
         .await?;
 
         Ok(())
@@ -553,7 +546,7 @@ impl OrderService {
         &self,
         order_item_id: Uuid,
         extra_info: serde_json::Value,
-        tx: &mut sqlx::Transaction<'_, sqlx::Postgres>,
+        conn: &mut PgConnection,
     ) -> Result<(), sqlx::Error> {
         sqlx::query(
             r#"
@@ -564,7 +557,7 @@ impl OrderService {
         )
         .bind(extra_info)
         .bind(order_item_id)
-        .execute(&mut **tx)
+        .execute(conn)
         .await?;
 
         Ok(())
