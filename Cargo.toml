@@ -4,7 +4,7 @@ members = [
     "bokchoy",
     "jidan",
     "kufang"
-]
+, "sous"]
 
 [workspace.dependencies]
 sqlx = { version = "0.8", features = [ "runtime-tokio", "tls-rustls", "postgres", "uuid" ] }
