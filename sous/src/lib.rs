@@ -53,22 +53,16 @@ pub trait Migrator: Send + Sync {
         Ok(rows.into_iter().map(|r| r.get("name")).collect())
     }
 
-    /// Apply pending migrations
-    async fn up(pool: &PgPool, steps: Option<u32>) -> Result<(), sqlx::Error> {
+    /// Apply the next pending migration
+    async fn up(pool: &PgPool) -> Result<(), sqlx::Error> {
         Self::create_migration_table(pool).await?;
 
         let applied = Self::get_applied_migrations(pool).await?;
         let migrations = Self::migrations();
 
-        let mut count = 0;
         for migration in migrations {
             if applied.contains(&migration.name().to_string()) {
                 continue;
-            }
-            if let Some(limit) = steps {
-                if count >= limit {
-                    break;
-                }
             }
 
             let mut tx = pool.begin().await?;
@@ -82,28 +76,22 @@ pub trait Migrator: Send + Sync {
 
             tx.commit().await?;
 
-            count += 1;
+            return Ok(());
         }
 
         Ok(())
     }
 
-    /// Revert applied migrations
-    async fn down(pool: &PgPool, steps: Option<u32>) -> Result<(), sqlx::Error> {
+    /// Revert the last applied migration
+    async fn down(pool: &PgPool) -> Result<(), sqlx::Error> {
         Self::create_migration_table(pool).await?;
         let applied = Self::get_applied_migrations(pool).await?;
         let migrations = Self::migrations();
 
-        let mut count = 0;
         // Revert in reverse order
         for migration in migrations.iter().rev() {
             if !applied.contains(&migration.name().to_string()) {
                 continue;
-            }
-            if let Some(limit) = steps {
-                if count >= limit {
-                    break;
-                }
             }
 
             let mut tx = pool.begin().await?;
@@ -119,7 +107,26 @@ pub trait Migrator: Send + Sync {
 
             tx.commit().await?;
 
-            count += 1;
+            return Ok(());
+        }
+
+        Ok(())
+    }
+
+    /// Print the status of migrations
+    async fn print_status(pool: &PgPool) -> Result<(), sqlx::Error> {
+        Self::create_migration_table(pool).await?;
+        let applied = Self::get_applied_migrations(pool).await?;
+        let migrations = Self::migrations();
+
+        for migration in migrations {
+            let name = migration.name();
+            let status = if applied.contains(&name.to_string()) {
+                "[x]"
+            } else {
+                "[ ]"
+            };
+            println!("{} {}", status, name);
         }
 
         Ok(())
