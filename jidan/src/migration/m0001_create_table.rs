@@ -34,7 +34,7 @@ impl MigrationTrait for Migration {
                 updated_at timestamptz NOT NULL DEFAULT now(),
                 expire_at timestamptz,
 
-                extra_info jsonb
+                extra_info jsonb NOT NULL DEFAULT '{}'
             )
             "#,
         )
@@ -46,14 +46,14 @@ impl MigrationTrait for Migration {
                 id uuid PRIMARY KEY DEFAULT uuidv7(),
                 order_id uuid REFERENCES jidan.orders NOT NULL,
 
-                item_id uuid NOT NULL,
-                item_type text NOT NULL,
+                sku_id uuid NOT NULL,
+                sku_type text NOT NULL,
 
                 original_price int8 NOT NULL,
                 unit_price int8 NOT NULL,
                 real_amount int8 NOT NULL,
 
-                extra_info jsonb
+                extra_info jsonb NOT NULL DEFAULT '{}'
             )
             "#,
         )

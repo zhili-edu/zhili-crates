@@ -1,6 +1,8 @@
 use std::sync::Arc;
 
-use crate::{PaymentService, Provider, psp::PaymentServiceProvider};
+use sqlx::PgConnection;
+
+use crate::{PaymentService, Provider, psp::PaymentServiceProvider, repo::PaymentRepo};
 
 #[derive(Default)]
 pub struct PaymentServiceBuilder {
@@ -12,11 +14,12 @@ impl PaymentServiceBuilder {
         self.providers.push((key, Box::new(provider)));
     }
 
-    pub fn build(self) -> PaymentService {
+    pub fn build(self) -> PaymentService<PgConnection> {
         let providers = self.providers.into_iter().collect();
 
         PaymentService {
             providers: Arc::new(providers),
+            repo: Arc::new(PaymentRepo),
         }
     }
 }

@@ -1,20 +1,17 @@
-use std::collections::HashMap;
-
 use serde_json::Value;
-use sqlx::{Postgres, QueryBuilder, Row};
 use time::OffsetDateTime;
 use uuid::Uuid;
 
-use crate::{OrderDetail, OrderItemDetail, OrderService, OrderStatus, OrderSummary};
-
 #[derive(Debug, Clone)]
 pub struct OrderQuery<'a> {
+    pub id: Option<Uuid>,
     pub user_id: Option<Uuid>,
-    pub status: Option<OrderStatus>,
+    pub status: Option<crate::OrderStatus>,
     pub channel: Option<String>,
+    pub channel_no: Option<String>,
     pub created_after: Option<OffsetDateTime>,
     pub created_before: Option<OffsetDateTime>,
-    pub has_items: Option<&'a [Uuid]>,
+    pub has_skus: Option<&'a [Uuid]>,
     pub extra_info: Option<&'a Value>,
     pub item_extra_info: Option<&'a Value>,
     pub offset: i64,
@@ -24,12 +21,14 @@ pub struct OrderQuery<'a> {
 impl Default for OrderQuery<'_> {
     fn default() -> Self {
         Self {
+            id: None,
             user_id: None,
             status: None,
             channel: None,
+            channel_no: None,
             created_after: None,
             created_before: None,
-            has_items: None,
+            has_skus: None,
             extra_info: None,
             item_extra_info: None,
             offset: 0,
@@ -43,18 +42,28 @@ impl<'a> OrderQuery<'a> {
         Self::default()
     }
 
+    pub fn id(mut self, id: Uuid) -> Self {
+        self.id = Some(id);
+        self
+    }
+
     pub fn user_id(mut self, user_id: Uuid) -> Self {
         self.user_id = Some(user_id);
         self
     }
 
-    pub fn status(mut self, status: OrderStatus) -> Self {
+    pub fn status(mut self, status: crate::OrderStatus) -> Self {
         self.status = Some(status);
         self
     }
 
     pub fn channel(mut self, channel: impl Into<String>) -> Self {
         self.channel = Some(channel.into());
+        self
+    }
+
+    pub fn channel_no(mut self, channel_no: impl Into<String>) -> Self {
+        self.channel_no = Some(channel_no.into());
         self
     }
 
@@ -68,8 +77,8 @@ impl<'a> OrderQuery<'a> {
         self
     }
 
-    pub fn has_items(mut self, items: &'a [Uuid]) -> Self {
-        self.has_items = Some(items);
+    pub fn has_skus(mut self, sku_ids: &'a [Uuid]) -> Self {
+        self.has_skus = Some(sku_ids);
         self
     }
 
@@ -100,454 +109,51 @@ impl<'a> OrderQuery<'a> {
     }
 }
 
-fn apply_filters<'a>(builder: &mut QueryBuilder<'a, Postgres>, query: &'a OrderQuery) {
-    if let Some(uid) = query.user_id {
-        builder.push(" AND user_id = ");
-        builder.push_bind(uid);
-    }
-    if let Some(status) = query.status {
-        builder.push(" AND status = ");
-        builder.push_bind(status);
-    }
-    if let Some(channel) = &query.channel {
-        builder.push(" AND channel = ");
-        builder.push_bind(channel);
-    }
-    if let Some(after) = query.created_after {
-        builder.push(" AND created_at >= ");
-        builder.push_bind(after);
-    }
-    if let Some(before) = query.created_before {
-        builder.push(" AND created_at < ");
-        builder.push_bind(before);
-    }
-    if let Some(items) = &query.has_items
-        && !items.is_empty()
-    {
-        builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE item_id = ANY(");
-        builder.push_bind(items);
-        builder.push("))");
-    }
-    if let Some(info) = query.extra_info {
-        builder.push(" AND extra_info @> ");
-        builder.push_bind(info);
-    }
-    if let Some(item_info) = query.item_extra_info {
-        builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE extra_info @> ");
-        builder.push_bind(item_info);
-        builder.push(")");
-    }
-}
-
-impl OrderService {
-    pub async fn query_orders(
-        &self,
-        query: OrderQuery<'_>,
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        let mut builder = QueryBuilder::new(
-            r#"
-            SELECT
-                id, user_id, status, channel, channel_no,
-                total_items_amount, payable_amount, paid_amount, refunded_amount,
-                created_at, expire_at
-            FROM jidan.orders
-            WHERE 1=1
-            "#,
-        );
-
-        apply_filters(&mut builder, &query);
-
-        builder.push(" ORDER BY created_at DESC");
-
-        if let Some(limit) = query.limit {
-            builder.push(" LIMIT ");
-            builder.push_bind(limit);
+impl<'a> OrderQuery<'a> {
+    pub(crate) fn apply_filters(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
+        if let Some(id) = self.id {
+            builder.push(" AND id = ");
+            builder.push_bind(id);
         }
-        if query.offset > 0 {
-            builder.push(" OFFSET ");
-            builder.push_bind(query.offset);
+        if let Some(uid) = self.user_id {
+            builder.push(" AND user_id = ");
+            builder.push_bind(uid);
         }
-
-        builder
-            .build_query_as::<OrderSummary>()
-            .fetch_all(&self.pool)
-            .await
-    }
-
-    pub async fn query_orders_with_details(
-        &self,
-        query: OrderQuery<'_>,
-    ) -> Result<Vec<OrderDetail>, sqlx::Error> {
-        let mut builder = QueryBuilder::new(
-            r#"
-            SELECT
-                id, user_id, channel, channel_no, status,
-                total_items_amount, payment_fee, discount_amount,
-                payable_amount, paid_amount, refunded_amount,
-                refund_fee,
-                created_at, updated_at, expire_at,
-                extra_info
-            FROM jidan.orders
-            WHERE 1=1
-            "#,
-        );
-
-        apply_filters(&mut builder, &query);
-
-        builder.push(" ORDER BY created_at DESC");
-
-        if let Some(limit) = query.limit {
-            builder.push(" LIMIT ");
-            builder.push_bind(limit);
+        if let Some(status) = self.status {
+            builder.push(" AND status = ");
+            builder.push_bind(status);
         }
-        if query.offset > 0 {
-            builder.push(" OFFSET ");
-            builder.push_bind(query.offset);
+        if let Some(channel) = &self.channel {
+            builder.push(" AND channel = ");
+            builder.push_bind(channel.as_str());
         }
-
-        let orders_rows = builder.build().fetch_all(&self.pool).await?;
-
-        if orders_rows.is_empty() {
-            return Ok(vec![]);
+        if let Some(channel_no) = &self.channel_no {
+            builder.push(" AND channel_no = ");
+            builder.push_bind(channel_no.as_str());
         }
-
-        let order_ids: Vec<Uuid> = orders_rows.iter().map(|row| row.get("id")).collect();
-
-        // Batch fetch items
-        let items_rows = sqlx::query(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info, order_id
-            FROM jidan.order_items
-            WHERE order_id = ANY($1)
-            "#,
-        )
-        .bind(&order_ids)
-        .fetch_all(&self.pool)
-        .await?;
-
-        let mut items_map: HashMap<Uuid, Vec<OrderItemDetail>> = HashMap::new();
-
-        for row in items_rows {
-            let order_id: Uuid = row.get("order_id");
-            let item = OrderItemDetail {
-                id: row.get("id"),
-                item_id: row.get("item_id"),
-                item_type: row.get("item_type"),
-                original_price: row.get("original_price"),
-                unit_price: row.get("unit_price"),
-                real_amount: row.get("real_amount"),
-                extra_info: row.try_get("extra_info").unwrap_or(None),
-            };
-            items_map.entry(order_id).or_default().push(item);
+        if let Some(after) = self.created_after {
+            builder.push(" AND created_at >= ");
+            builder.push_bind(after);
         }
-
-        let mut results = Vec::with_capacity(orders_rows.len());
-        for row in orders_rows {
-            let id: Uuid = row.get("id");
-            let items = items_map.remove(&id).unwrap_or_default();
-
-            results.push(OrderDetail {
-                id,
-                user_id: row.get("user_id"),
-                channel: row.get("channel"),
-                channel_no: row.get("channel_no"),
-                status: row.get("status"),
-                total_items_amount: row.get("total_items_amount"),
-                payment_fee: row.get("payment_fee"),
-                discount_amount: row.get("discount_amount"),
-                payable_amount: row.get("payable_amount"),
-                paid_amount: row.get("paid_amount"),
-                refunded_amount: row.get("refunded_amount"),
-                refund_fee: row.get("refund_fee"),
-                created_at: row.get("created_at"),
-                updated_at: row.get("updated_at"),
-                expire_at: row.get("expire_at"),
-                extra_info: row.try_get("extra_info").unwrap_or(None),
-                items,
-            });
+        if let Some(before) = self.created_before {
+            builder.push(" AND created_at < ");
+            builder.push_bind(before);
         }
-
-        Ok(results)
-    }
-
-    pub async fn get_orders_by_user_id(
-        &self,
-        user_id: Uuid,
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        self.query_orders(OrderQuery::new().user_id(user_id).limit(None))
-            .await
-    }
-
-    pub async fn get_orders_by_user_id_and_status(
-        &self,
-        user_id: Uuid,
-        status: OrderStatus,
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        self.query_orders(
-            OrderQuery::new()
-                .user_id(user_id)
-                .status(status)
-                .limit(None),
-        )
-        .await
-    }
-
-    pub async fn get_orders_by_user_id_and_channel(
-        &self,
-        user_id: Uuid,
-        channel: &str,
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        self.query_orders(
-            OrderQuery::new()
-                .user_id(user_id)
-                .channel(channel)
-                .limit(None),
-        )
-        .await
-    }
-
-    pub async fn get_order_detail_by_id(
-        &self,
-        id: Uuid,
-    ) -> Result<Option<OrderDetail>, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT
-                id, user_id, channel, channel_no, status,
-                total_items_amount, payment_fee, discount_amount,
-                payable_amount, paid_amount, refunded_amount,
-                refund_fee,
-                created_at, updated_at, expire_at,
-                extra_info
-            FROM jidan.orders
-            WHERE id = $1
-            "#,
-        )
-        .bind(id)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let row = match row {
-            Some(r) => r,
-            None => return Ok(None),
-        };
-
-        let items = sqlx::query_as::<_, OrderItemDetail>(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info
-            FROM jidan.order_items
-            WHERE order_id = $1
-            "#,
-        )
-        .bind(id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(Some(OrderDetail {
-            id: row.try_get("id")?,
-            user_id: row.try_get("user_id")?,
-            channel: row.try_get("channel")?,
-            channel_no: row.get("channel_no"),
-            status: row.try_get("status")?,
-            total_items_amount: row.try_get("total_items_amount")?,
-            payment_fee: row.try_get("payment_fee")?,
-            discount_amount: row.try_get("discount_amount")?,
-            payable_amount: row.try_get("payable_amount")?,
-            paid_amount: row.try_get("paid_amount")?,
-            refunded_amount: row.try_get("refunded_amount")?,
-            refund_fee: row.try_get("refund_fee")?,
-            created_at: row.try_get("created_at")?,
-            updated_at: row.try_get("updated_at")?,
-            expire_at: row.try_get("expire_at")?,
-            extra_info: row.try_get("extra_info")?,
-            items,
-        }))
-    }
-
-    pub async fn get_order_detail_by_channel_no(
-        &self,
-        channel: &str,
-        channel_no: &str,
-    ) -> Result<Option<OrderDetail>, sqlx::Error> {
-        let row = sqlx::query(
-            r#"
-            SELECT
-                id, user_id, channel, channel_no, status,
-                total_items_amount, payment_fee, discount_amount,
-                payable_amount, paid_amount, refunded_amount,
-                refund_fee,
-                created_at, updated_at, expire_at,
-                extra_info
-            FROM jidan.orders
-            WHERE channel = $1 AND channel_no = $2
-            "#,
-        )
-        .bind(channel)
-        .bind(channel_no)
-        .fetch_optional(&self.pool)
-        .await?;
-
-        let mut order = match row {
-            Some(row) => OrderDetail {
-                id: row.try_get("id")?,
-                user_id: row.try_get("user_id")?,
-                channel: row.try_get("channel")?,
-                channel_no: row.get("channel_no"),
-                status: row.try_get("status")?,
-                total_items_amount: row.try_get("total_items_amount")?,
-                payment_fee: row.try_get("payment_fee")?,
-                discount_amount: row.try_get("discount_amount")?,
-                payable_amount: row.try_get("payable_amount")?,
-                paid_amount: row.try_get("paid_amount")?,
-                refunded_amount: row.try_get("refunded_amount")?,
-                refund_fee: row.try_get("refund_fee")?,
-                created_at: row.try_get("created_at")?,
-                updated_at: row.try_get("updated_at")?,
-                expire_at: row.try_get("expire_at")?,
-                extra_info: row.try_get("extra_info")?,
-                items: vec![],
-            },
-            None => return Ok(None),
-        };
-
-        order.items = sqlx::query_as::<_, OrderItemDetail>(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info
-            FROM jidan.order_items
-            WHERE order_id = $1
-            "#,
-        )
-        .bind(order.id)
-        .fetch_all(&self.pool)
-        .await?;
-
-        Ok(Some(order))
-    }
-
-    /// 获取创建于 [begin, end) 内的订单
-    pub async fn get_orders_created_in(
-        &self,
-        begin: time::OffsetDateTime,
-        end: time::OffsetDateTime,
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        self.query_orders(
-            OrderQuery::new()
-                .created_after(begin)
-                .created_before(end)
-                .limit(None),
-        )
-        .await
-    }
-
-    /// 获取所有含有给定物品的订单
-    pub async fn get_orders_of_items(
-        &self,
-        item_ids: &[Uuid],
-    ) -> Result<Vec<OrderSummary>, sqlx::Error> {
-        self.query_orders(OrderQuery::new().has_items(item_ids).limit(None))
-            .await
-    }
-
-    /// 获取所有含有给定物品的订单
-    pub async fn get_order_id_map_of_items(
-        &self,
-        item_ids: &[Uuid],
-    ) -> Result<HashMap<Uuid, Uuid>, sqlx::Error> {
-        Ok(sqlx::query_as::<_, (Uuid, Uuid)>(
-            r#"
-            SELECT id, order_id FROM jidan.order_items WHERE item_id = ANY($1)
-            "#,
-        )
-        .bind(item_ids)
-        .fetch_all(&self.pool)
-        .await?
-        .into_iter()
-        .collect())
-    }
-
-    /// 获取订单内的物品
-    pub async fn get_items_of_order(
-        &self,
-        order_id: Uuid,
-    ) -> Result<Vec<OrderItemDetail>, sqlx::Error> {
-        sqlx::query_as::<_, OrderItemDetail>(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info
-            FROM jidan.order_items
-            WHERE order_id = $1
-            "#,
-        )
-        .bind(order_id)
-        .fetch_all(&self.pool)
-        .await
-    }
-
-    /// 获取订单内的物品
-    pub async fn get_items_of_orders(
-        &self,
-        order_ids: &[Uuid],
-    ) -> Result<Vec<OrderItemDetail>, sqlx::Error> {
-        sqlx::query_as::<_, OrderItemDetail>(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info
-            FROM jidan.order_items
-            WHERE order_id = ANY($1)
-            "#,
-        )
-        .bind(order_ids)
-        .fetch_all(&self.pool)
-        .await
-    }
-
-    pub async fn get_items_by_ids(
-        &self,
-        item_ids: &[Uuid],
-    ) -> Result<Vec<OrderItemDetail>, sqlx::Error> {
-        sqlx::query_as::<_, OrderItemDetail>(
-            r#"
-            SELECT
-                id, item_id, item_type, original_price, unit_price, real_amount, extra_info
-            FROM jidan.order_items
-            WHERE id = ANY($1)
-            "#,
-        )
-        .bind(item_ids)
-        .fetch_all(&self.pool)
-        .await
-    }
-
-    pub async fn find_all_by_extra_info(
-        &self,
-        extra_info: &Value,
-    ) -> Result<Vec<OrderDetail>, sqlx::Error> {
-        self.query_orders_with_details(OrderQuery::new().extra_info(extra_info).limit(None))
-            .await
-    }
-
-    pub async fn find_optional_by_extra_info(
-        &self,
-        extra_info: &Value,
-    ) -> Result<Option<OrderDetail>, sqlx::Error> {
-        let mut orders = self
-            .query_orders_with_details(OrderQuery::new().extra_info(extra_info).limit(Some(1)))
-            .await?;
-        Ok(orders.pop())
-    }
-
-    pub async fn find_orders_by_item_extra_info_contains_any(
-        &self,
-        item_extra_info: &Value,
-    ) -> Result<Vec<OrderDetail>, sqlx::Error> {
-        self.query_orders_with_details(
-            OrderQuery::new()
-                .item_extra_info(item_extra_info)
-                .limit(None),
-        )
-        .await
+        if let Some(sku_ids) = &self.has_skus
+            && !sku_ids.is_empty()
+        {
+            builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE sku_id = ANY(");
+            builder.push_bind(sku_ids);
+            builder.push("))");
+        }
+        if let Some(info) = self.extra_info {
+            builder.push(" AND extra_info @> ");
+            builder.push_bind(info);
+        }
+        if let Some(item_info) = self.item_extra_info {
+            builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE extra_info @> ");
+            builder.push_bind(item_info);
+            builder.push(")");
+        }
     }
 }
