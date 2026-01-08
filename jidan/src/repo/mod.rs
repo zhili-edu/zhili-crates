@@ -256,7 +256,10 @@ impl OrderRepository for OrderRepo {
         .bind(args.payment_fee)
         .bind(args.discount_amount)
         .bind(args.payable_amount)
-        .bind(args.extra_info)
+        .bind(
+            args.extra_info
+                .unwrap_or_else(|| serde_json::Value::Object(Default::default())),
+        )
         .execute(&mut *conn)
         .await?;
 
@@ -291,7 +294,12 @@ impl OrderRepository for OrderRepo {
         .bind(original_price)
         .bind(unit_price)
         .bind(real_amount)
-        .bind(extra_info)
+        .bind(
+            extra_info
+                .into_iter()
+                .map(|info| info.unwrap_or_else(|| serde_json::Value::Object(Default::default())))
+                .collect::<Vec<_>>(),
+        )
         .execute(&mut *conn)
         .await?;
 
