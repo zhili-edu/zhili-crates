@@ -20,15 +20,11 @@ impl MigrationTrait for Migration {
                 channel_no text,
                 status int2 NOT NULL,
 
-                total_items_amount int8 NOT NULL,
                 discount_amount int8 NOT NULL DEFAULT 0,
                 payable_amount int8 NOT NULL,
-
-                payment_fee int8 NOT NULL DEFAULT 0,
                 paid_amount int8 NOT NULL DEFAULT 0,
-
-                refund_fee int8 NOT NULL DEFAULT 0,
                 refunded_amount int8 NOT NULL DEFAULT 0,
+                channel_fee int8 NOT NULL DEFAULT 0,
 
                 created_at timestamptz NOT NULL DEFAULT now(),
                 updated_at timestamptz NOT NULL DEFAULT now(),
@@ -49,9 +45,11 @@ impl MigrationTrait for Migration {
                 sku_id uuid NOT NULL,
                 sku_type text NOT NULL,
 
-                original_price int8 NOT NULL,
+                list_price int8 NOT NULL,
                 unit_price int8 NOT NULL,
-                real_amount int8 NOT NULL,
+                discount_amount int8 NOT NULL DEFAULT 0,
+                payable_amount int8 NOT NULL,
+                is_refunded boolean NOT NULL DEFAULT false,
 
                 extra_info jsonb NOT NULL DEFAULT '{}'
             )

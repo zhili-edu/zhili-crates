@@ -20,6 +20,12 @@ impl<C> Clone for OrderService<C> {
     }
 }
 
+impl Default for OrderService<sqlx::PgConnection> {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 impl OrderService<sqlx::PgConnection> {
     pub fn new() -> Self {
         Self {
@@ -41,14 +47,17 @@ impl<C> OrderService<C> {
         info: CreateOrder,
         conn: &mut C,
     ) -> Result<Uuid, crate::CreateOrderError> {
+        if info.items.is_empty() {
+            return Err(crate::CreateOrderError::EmptyItems);
+        }
         let total_items_amount: i64 = info.items.iter().map(|i| i.unit_price).sum();
-        let payment_fee: i64 = info.payment_fee.unwrap_or(0);
+        let channel_fee: i64 = info.channel_fee;
         let discount_amount: i64 = info.discount_amount.unwrap_or(0);
 
-        if payment_fee < 0 {
+        if channel_fee < 0 {
             return Err(crate::CreateOrderError::NegativeAmount {
-                field: "payment_fee".to_string(),
-                value: payment_fee,
+                field: "channel_fee".to_string(),
+                value: channel_fee,
             });
         }
 
@@ -66,7 +75,7 @@ impl<C> OrderService<C> {
             });
         }
 
-        let payable_amount: i64 = total_items_amount + payment_fee - discount_amount;
+        let payable_amount: i64 = total_items_amount - discount_amount;
 
         if payable_amount < 0 {
             return Err(crate::CreateOrderError::InvalidPayableAmount {
@@ -74,18 +83,48 @@ impl<C> OrderService<C> {
             });
         }
 
+        let mut per_item_discount: Vec<i64> = vec![0; info.items.len()];
+        if total_items_amount > 0 && discount_amount > 0 {
+            let mut base_sum: i64 = 0;
+            for (idx, item) in info.items.iter().enumerate() {
+                let base = ((item.unit_price as i128 * discount_amount as i128)
+                    / total_items_amount as i128) as i64;
+                per_item_discount[idx] = base;
+                base_sum += base;
+            }
+
+            let remainder = discount_amount - base_sum;
+            if remainder > 0 {
+                let mut indices: Vec<usize> = (0..info.items.len()).collect();
+                indices.sort_by(|&a, &b| {
+                    info.items[b]
+                        .unit_price
+                        .cmp(&info.items[a].unit_price)
+                        .then(a.cmp(&b))
+                });
+                for idx in indices.into_iter().take(remainder as usize) {
+                    per_item_discount[idx] += 1;
+                }
+            }
+        }
+
         let items: Vec<repo::OrderItemCreateArgs> = info
             .items
             .into_iter()
-            .map(|item| repo::OrderItemCreateArgs {
-                id: Uuid::now_v7(),
-                order_id,
-                sku_id: item.sku_id,
-                sku_type: item.sku_type,
-                original_price: item.original_price,
-                unit_price: item.unit_price,
-                real_amount: item.real_amount,
-                extra_info: item.extra_info,
+            .enumerate()
+            .map(|(idx, item)| {
+                let item_discount = per_item_discount[idx];
+                repo::OrderItemCreateArgs {
+                    id: Uuid::now_v7(),
+                    order_id,
+                    sku_id: item.sku_id,
+                    sku_type: item.sku_type,
+                    list_price: item.list_price,
+                    unit_price: item.unit_price,
+                    discount_amount: item_discount,
+                    payable_amount: item.unit_price - item_discount,
+                    extra_info: item.extra_info,
+                }
             })
             .collect();
 
@@ -98,10 +137,9 @@ impl<C> OrderService<C> {
                     channel: info.channel,
                     channel_no: info.channel_no,
                     items,
-                    payment_fee,
                     discount_amount,
-                    total_items_amount,
                     payable_amount,
+                    channel_fee,
                     extra_info: info.extra_info,
                 },
             )
@@ -128,7 +166,10 @@ impl<C> OrderService<C> {
         self.repo
             .update_status(conn, order_id, OrderStatus::Fulfilled)
             .await
-            .map_err(crate::OrderStatusError::Database)
+            .map_err(|err| match err {
+                sqlx::Error::RowNotFound => crate::OrderStatusError::NotFound { order_id },
+                _ => crate::OrderStatusError::Database(err),
+            })
     }
 
     /// 记录支付金额，并将订单转换为Processing状态
@@ -147,7 +188,7 @@ impl<C> OrderService<C> {
 
         let order = self
             .repo
-            .query_order_optional(conn, &OrderQuery::new().id(order_id))
+            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
             .await
             .map_err(crate::PaymentError::Database)?
             .ok_or_else(|| crate::PaymentError::NotFound { order_id })?;
@@ -202,26 +243,66 @@ impl<C> OrderService<C> {
         })
     }
 
-    /// 记录退款金额，并根据退款情况更新订单状态
+    /// 退款多个订单项（每个item仅支持一次退款）
     /// 如果已退款金额 >= 已付金额，状态将更新为 Refunded
-    pub async fn add_refund(
+    pub async fn refund_items(
         &self,
         order_id: Uuid,
-        refund_amount: i64,
+        item_ids: &[Uuid],
         conn: &mut C,
     ) -> Result<RefundResult, crate::RefundError> {
+        if item_ids.is_empty() {
+            return Err(crate::RefundError::EmptyItems);
+        }
+
+        let order = self
+            .repo
+            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
+            .await
+            .map_err(crate::RefundError::Database)?
+            .ok_or_else(|| crate::RefundError::NotFound { order_id })?;
+
+        let mut unique_ids = Vec::new();
+        let mut seen = std::collections::HashSet::new();
+        for id in item_ids.iter().copied() {
+            if seen.insert(id) {
+                unique_ids.push(id);
+            }
+        }
+
+        let items = self
+            .repo
+            .get_items_by_ids(conn, &unique_ids)
+            .await
+            .map_err(crate::RefundError::Database)?;
+
+        let mut item_map = std::collections::HashMap::new();
+        for item in items {
+            item_map.insert(item.id, item);
+        }
+
+        let mut refund_amount: i64 = 0;
+        for item_id in &unique_ids {
+            let item = item_map
+                .get(item_id)
+                .ok_or_else(|| crate::RefundError::ItemNotFound { item_id: *item_id })?;
+
+            if item.order_id != order_id {
+                return Err(crate::RefundError::ItemNotFound { item_id: *item_id });
+            }
+
+            if item.is_refunded {
+                return Err(crate::RefundError::ItemAlreadyRefunded { item_id: *item_id });
+            }
+
+            refund_amount += item.payable_amount;
+        }
+
         if refund_amount <= 0 {
             return Err(crate::RefundError::InvalidAmount {
                 amount: refund_amount,
             });
         }
-
-        let order = self
-            .repo
-            .query_order_optional(conn, &OrderQuery::new().id(order_id))
-            .await
-            .map_err(crate::RefundError::Database)?
-            .ok_or_else(|| crate::RefundError::NotFound { order_id })?;
 
         let new_refunded_amount = order.refunded_amount + refund_amount;
 
@@ -232,6 +313,18 @@ impl<C> OrderService<C> {
                 refunded: order.refunded_amount,
                 amount: refund_amount,
             });
+        }
+
+        for item_id in &unique_ids {
+            self.repo
+                .mark_item_refunded(conn, order_id, *item_id)
+                .await
+                .map_err(|err| match err {
+                    sqlx::Error::RowNotFound => {
+                        crate::RefundError::ItemAlreadyRefunded { item_id: *item_id }
+                    }
+                    _ => crate::RefundError::Database(err),
+                })?;
         }
 
         let new_status = if new_refunded_amount >= order.paid_amount {
@@ -262,11 +355,22 @@ impl<C> OrderService<C> {
         })
     }
 
-    /// 扫描并取消所有已过期的订单 (expire_at < now)
+    /// 退款指定订单项（每个item仅支持一次退款）
+    pub async fn refund_item(
+        &self,
+        order_id: Uuid,
+        item_id: Uuid,
+        conn: &mut C,
+    ) -> Result<RefundResult, crate::RefundError> {
+        self.refund_items(order_id, std::slice::from_ref(&item_id), conn)
+            .await
+    }
+
+    /// 扫描并关闭所有已过期的订单 (expire_at < now)
     /// 仅针对 Pending 状态的订单生效
     /// 返回修改的订单数
-    pub async fn cancel_expired_orders(&self, conn: &mut C) -> Result<u64, sqlx::Error> {
-        self.repo.cancel_expired_orders(conn).await
+    pub async fn close_expired_orders(&self, conn: &mut C) -> Result<u64, sqlx::Error> {
+        self.repo.close_expired_orders(conn).await
     }
 
     /// 将 Fulfilled 状态的订单手动标记为 Completed
@@ -277,7 +381,7 @@ impl<C> OrderService<C> {
     ) -> Result<(), crate::OrderStatusError> {
         let order = self
             .repo
-            .query_order_optional(conn, &OrderQuery::new().id(order_id))
+            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
             .await
             .map_err(crate::OrderStatusError::Database)?
             .ok_or_else(|| crate::OrderStatusError::NotFound { order_id })?;
@@ -308,13 +412,19 @@ impl<C> OrderService<C> {
         self.repo
             .update_status(conn, order_id, OrderStatus::Closed)
             .await
-            .map_err(crate::OrderStatusError::Database)?;
+            .map_err(|err| match err {
+                sqlx::Error::RowNotFound => crate::OrderStatusError::NotFound { order_id },
+                _ => crate::OrderStatusError::Database(err),
+            })?;
 
         if let Some(patch) = extra_info_patch {
             self.repo
                 .update_extra_info(conn, order_id, patch)
                 .await
-                .map_err(crate::OrderStatusError::Database)?;
+                .map_err(|err| match err {
+                    sqlx::Error::RowNotFound => crate::OrderStatusError::NotFound { order_id },
+                    _ => crate::OrderStatusError::Database(err),
+                })?;
         }
 
         Ok(())
@@ -347,7 +457,7 @@ impl<C> OrderService<C> {
         conn: &mut C,
         query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
-        self.repo.query_orders(conn, query).await
+        self.repo.query(conn, query).await
     }
 
     pub async fn query_order_optional(
@@ -355,7 +465,7 @@ impl<C> OrderService<C> {
         conn: &mut C,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
-        self.repo.query_order_optional(conn, query).await
+        self.repo.query_one(conn, query).await
     }
 
     /// 获取单个订单及其items
@@ -440,12 +550,11 @@ mod tests {
             items: vec![CreateOrderItem {
                 sku_type: "ticket".to_string(),
                 sku_id: Uuid::now_v7(),
-                original_price: 10000,
+                list_price: 10000,
                 unit_price: 10000,
-                real_amount: 10000,
                 extra_info: None,
             }],
-            payment_fee: Some(100),
+            channel_fee: 0,
             discount_amount: Some(0),
             extra_info: None,
         }
@@ -505,6 +614,20 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_create_order_with_empty_items() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut info = create_test_order(user_id);
+        info.items = Vec::new();
+
+        let mut conn = ();
+        let result = service.create_order(info, &mut conn).await;
+
+        assert!(result.is_err());
+        assert!(matches!(result, Err(crate::CreateOrderError::EmptyItems)));
+    }
+
+    #[tokio::test]
     async fn test_add_zero_payment() {
         let (service, _) = create_test_service();
         let user_id = Uuid::now_v7();
@@ -552,11 +675,11 @@ mod tests {
             .await
             .unwrap();
         let result = service
-            .add_payment(order_id, 5100, &mut conn)
+            .add_payment(order_id, 5000, &mut conn)
             .await
             .unwrap();
 
-        assert_eq!(result.paid_amount, 10100);
+        assert_eq!(result.paid_amount, 10000);
         assert_eq!(result.current_status, OrderStatus::Fulfilled);
     }
 
@@ -599,11 +722,11 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_create_order_with_negative_payment_fee() {
+    async fn test_create_order_with_negative_channel_fee() {
         let (service, _) = create_test_service();
         let user_id = Uuid::now_v7();
         let mut info = create_test_order(user_id);
-        info.payment_fee = Some(-100);
+        info.channel_fee = -100;
 
         let mut conn = ();
         let result = service.create_order(info, &mut conn).await;
@@ -690,7 +813,10 @@ mod tests {
             .await
             .unwrap();
 
-        let result = service.add_refund(order_id, 10000, &mut conn).await;
+        let items = service.get_order_items(&mut conn, order_id).await.unwrap();
+        let item_id = items.first().unwrap().id;
+
+        let result = service.refund_item(order_id, item_id, &mut conn).await;
 
         assert!(result.is_err());
         assert!(matches!(
@@ -705,23 +831,57 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn test_negative_refund() {
+    async fn test_refund_item_twice() {
         let (service, _) = create_test_service();
         let user_id = Uuid::now_v7();
         let (order_id, _) = create_and_get_order(&service, user_id).await;
 
         let mut conn = ();
         service
-            .add_payment(order_id, 5000, &mut conn)
+            .add_payment(order_id, 10000, &mut conn)
             .await
             .unwrap();
 
-        let result = service.add_refund(order_id, -100, &mut conn).await;
+        let items = service.get_order_items(&mut conn, order_id).await.unwrap();
+        let item_id = items.first().unwrap().id;
+
+        service
+            .refund_item(order_id, item_id, &mut conn)
+            .await
+            .unwrap();
+
+        let result = service.refund_item(order_id, item_id, &mut conn).await;
 
         assert!(result.is_err());
         assert!(matches!(
             result,
-            Err(crate::RefundError::InvalidAmount { amount: -100 })
+            Err(crate::RefundError::ItemAlreadyRefunded { .. })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_close_expired_orders_marks_closed() {
+        let (service, mock_repo) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let info = create_test_order(user_id);
+
+        let mut conn = ();
+        let order_id = service.create_order(info, &mut conn).await.unwrap();
+
+        {
+            let mut orders = mock_repo.orders.write().await;
+            let order = orders.get_mut(&order_id).unwrap();
+            order.expire_at = Some(time::OffsetDateTime::now_utc() - time::Duration::seconds(1));
+        }
+
+        let count = service.close_expired_orders(&mut conn).await.unwrap();
+        assert_eq!(count, 1);
+
+        let order = service
+            .query_order_optional(&mut conn, &OrderQuery::new().id(order_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(order.status, OrderStatus::Closed);
     }
 }

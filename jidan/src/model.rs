@@ -10,9 +10,11 @@ pub struct OrderItem {
     pub sku_id: Uuid,
     pub sku_type: String,
     pub order_id: Uuid,
-    pub original_price: i64,
     pub unit_price: i64,
-    pub real_amount: i64,
+    pub list_price: i64,
+    pub discount_amount: i64,
+    pub payable_amount: i64,
+    pub is_refunded: bool,
     pub extra_info: Value,
 }
 
@@ -24,13 +26,11 @@ pub struct Order {
     pub channel_no: Option<String>,
     pub status: OrderStatus,
 
-    pub total_items_amount: i64,
-    pub payment_fee: i64,
     pub discount_amount: i64,
     pub payable_amount: i64,
     pub paid_amount: i64,
     pub refunded_amount: i64,
-    pub refund_fee: i64,
+    pub channel_fee: i64,
 
     pub created_at: OffsetDateTime,
     pub updated_at: OffsetDateTime,
@@ -121,7 +121,7 @@ pub struct CreateOrder {
 
     pub items: Vec<CreateOrderItem>,
 
-    pub payment_fee: Option<i64>,
+    pub channel_fee: i64,
     pub discount_amount: Option<i64>,
 
     pub extra_info: Option<serde_json::Value>,
@@ -132,9 +132,8 @@ pub struct CreateOrderItem {
     pub sku_type: String,
     pub sku_id: Uuid,
 
-    pub original_price: i64,
+    pub list_price: i64,
     pub unit_price: i64,
-    pub real_amount: i64,
 
     pub extra_info: Option<serde_json::Value>,
 }

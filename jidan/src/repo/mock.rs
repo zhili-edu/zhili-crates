@@ -8,6 +8,40 @@ use uuid::Uuid;
 
 use crate::{Order, OrderItem, OrderQuery, OrderStatus};
 
+fn json_contains(target: &Value, filter: &Value) -> bool {
+    match (target, filter) {
+        (Value::Object(target_map), Value::Object(filter_map)) => {
+            filter_map.iter().all(|(k, v)| {
+                target_map
+                    .get(k)
+                    .is_some_and(|target_val| json_contains(target_val, v))
+            })
+        }
+        (Value::Array(target_arr), Value::Array(filter_arr)) => filter_arr
+            .iter()
+            .all(|needle| target_arr.iter().any(|item| item == needle)),
+        _ => target == filter,
+    }
+}
+
+fn json_merge(base: &Value, patch: &Value) -> Value {
+    match (base, patch) {
+        (Value::Object(base_map), Value::Object(patch_map)) => {
+            let mut merged = base_map.clone();
+            for (k, v) in patch_map {
+                merged.insert(k.clone(), v.clone());
+            }
+            Value::Object(merged)
+        }
+        (Value::Array(base_arr), Value::Array(patch_arr)) => {
+            let mut merged = base_arr.clone();
+            merged.extend(patch_arr.iter().cloned());
+            Value::Array(merged)
+        }
+        _ => patch.clone(),
+    }
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct MockOrderRepository {
     pub orders: Arc<RwLock<HashMap<Uuid, Order>>>,
@@ -33,28 +67,198 @@ impl MockOrderRepository {
 impl super::OrderRepository for MockOrderRepository {
     type Context = ();
 
-    async fn query_orders(
+    async fn query(
         &self,
         _conn: &mut Self::Context,
-        _query: &OrderQuery<'_>,
+        query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
-        todo!()
+        let orders = self.orders.read().await;
+        let items = self.order_items.read().await;
+        let mut result: Vec<Order> = orders
+            .values()
+            .filter(|order| {
+                if let Some(id) = query.id {
+                    if order.id != id {
+                        return false;
+                    }
+                }
+                if let Some(user_id) = query.user_id {
+                    if order.user_id != user_id {
+                        return false;
+                    }
+                }
+                if let Some(status) = query.status {
+                    if order.status != status {
+                        return false;
+                    }
+                }
+                if let Some(channel) = &query.channel {
+                    if &order.channel != channel {
+                        return false;
+                    }
+                }
+                if let Some(channel_no) = &query.channel_no {
+                    if order.channel_no.as_ref() != Some(channel_no) {
+                        return false;
+                    }
+                }
+                if let Some(after) = query.created_after {
+                    if order.created_at < after {
+                        return false;
+                    }
+                }
+                if let Some(before) = query.created_before {
+                    if order.created_at >= before {
+                        return false;
+                    }
+                }
+                if let Some(extra) = query.extra_info {
+                    if !json_contains(&order.extra_info, extra) {
+                        return false;
+                    }
+                }
+                if let Some(sku_ids) = &query.has_skus {
+                    if !sku_ids.is_empty()
+                        && !items.values().any(|(item, _)| {
+                            item.order_id == order.id && sku_ids.contains(&item.sku_id)
+                        })
+                    {
+                        return false;
+                    }
+                }
+                if let Some(item_info) = query.item_extra_info {
+                    if !items.values().any(|(item, _)| {
+                        item.order_id == order.id && json_contains(&item.extra_info, item_info)
+                    }) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+
+        let offset = query.offset.max(0) as usize;
+        if offset > 0 {
+            if offset >= result.len() {
+                return Ok(Vec::new());
+            }
+            result = result.split_off(offset);
+        }
+
+        if let Some(limit) = query.limit {
+            if limit <= 0 {
+                return Ok(Vec::new());
+            }
+            let limit = limit as usize;
+            if result.len() > limit {
+                result.truncate(limit);
+            }
+        }
+
+        Ok(result)
     }
 
-    async fn query_order_optional(
+    async fn query_one(
         &self,
         _conn: &mut Self::Context,
-        _query: &OrderQuery<'_>,
+        query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
-        todo!()
+        let orders = self.orders.read().await;
+        let items = self.order_items.read().await;
+        let mut result: Vec<Order> = orders
+            .values()
+            .filter(|order| {
+                if let Some(id) = query.id {
+                    if order.id != id {
+                        return false;
+                    }
+                }
+                if let Some(user_id) = query.user_id {
+                    if order.user_id != user_id {
+                        return false;
+                    }
+                }
+                if let Some(status) = query.status {
+                    if order.status != status {
+                        return false;
+                    }
+                }
+                if let Some(channel) = &query.channel {
+                    if &order.channel != channel {
+                        return false;
+                    }
+                }
+                if let Some(channel_no) = &query.channel_no {
+                    if order.channel_no.as_ref() != Some(channel_no) {
+                        return false;
+                    }
+                }
+                if let Some(after) = query.created_after {
+                    if order.created_at < after {
+                        return false;
+                    }
+                }
+                if let Some(before) = query.created_before {
+                    if order.created_at >= before {
+                        return false;
+                    }
+                }
+                if let Some(extra) = query.extra_info {
+                    if !json_contains(&order.extra_info, extra) {
+                        return false;
+                    }
+                }
+                if let Some(sku_ids) = &query.has_skus {
+                    if !sku_ids.is_empty()
+                        && !items.values().any(|(item, _)| {
+                            item.order_id == order.id && sku_ids.contains(&item.sku_id)
+                        })
+                    {
+                        return false;
+                    }
+                }
+                if let Some(item_info) = query.item_extra_info {
+                    if !items.values().any(|(item, _)| {
+                        item.order_id == order.id && json_contains(&item.extra_info, item_info)
+                    }) {
+                        return false;
+                    }
+                }
+                true
+            })
+            .cloned()
+            .collect();
+
+        result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
+        Ok(result.into_iter().next())
+    }
+
+    async fn query_one_for_update(
+        &self,
+        conn: &mut Self::Context,
+        query: &OrderQuery<'_>,
+    ) -> Result<Option<Order>, sqlx::Error> {
+        self.query_one(conn, query).await
     }
 
     async fn get_orders_items(
         &self,
         _conn: &mut Self::Context,
-        _order_ids: &[Uuid],
+        order_ids: &[Uuid],
     ) -> Result<Vec<OrderItem>, sqlx::Error> {
-        todo!()
+        if order_ids.is_empty() {
+            return Ok(Vec::new());
+        }
+        let items = self.order_items.read().await;
+        let result: Vec<OrderItem> = items
+            .values()
+            .filter(|(item, _)| order_ids.contains(&item.order_id))
+            .map(|(item, _)| item.clone())
+            .collect();
+        Ok(result)
     }
 
     async fn get_items_by_ids(
@@ -85,13 +289,11 @@ impl super::OrderRepository for MockOrderRepository {
             channel: args.channel,
             channel_no: args.channel_no,
             status: OrderStatus::Pending,
-            total_items_amount: args.total_items_amount,
-            payment_fee: args.payment_fee,
             discount_amount: args.discount_amount,
             payable_amount: args.payable_amount,
             paid_amount: 0,
             refunded_amount: 0,
-            refund_fee: 0,
+            channel_fee: args.channel_fee,
             created_at: now,
             updated_at: now,
             expire_at: None,
@@ -113,9 +315,11 @@ impl super::OrderRepository for MockOrderRepository {
                         sku_id: item.sku_id,
                         sku_type: item.sku_type,
                         order_id: args.id,
-                        original_price: item.original_price,
                         unit_price: item.unit_price,
-                        real_amount: item.real_amount,
+                        list_price: item.list_price,
+                        discount_amount: item.discount_amount,
+                        payable_amount: item.payable_amount,
+                        is_refunded: false,
                         extra_info: item
                             .extra_info
                             .unwrap_or(serde_json::Value::Object(Default::default())),
@@ -135,11 +339,14 @@ impl super::OrderRepository for MockOrderRepository {
         status: OrderStatus,
     ) -> Result<(), sqlx::Error> {
         let mut orders = self.orders.write().await;
-        if let Some(order) = orders.get_mut(&order_id) {
-            order.status = status;
-            order.updated_at = time::OffsetDateTime::now_utc();
+        match orders.get_mut(&order_id) {
+            Some(order) => {
+                order.status = status;
+                order.updated_at = time::OffsetDateTime::now_utc();
+                Ok(())
+            }
+            None => Err(sqlx::Error::RowNotFound),
         }
-        Ok(())
     }
 
     async fn update_payment(
@@ -148,12 +355,15 @@ impl super::OrderRepository for MockOrderRepository {
         args: super::OrderPaymentUpdateArgs,
     ) -> Result<(), sqlx::Error> {
         let mut orders = self.orders.write().await;
-        if let Some(order) = orders.get_mut(&args.order_id) {
-            order.paid_amount = args.new_paid_amount;
-            order.status = args.new_status;
-            order.updated_at = time::OffsetDateTime::now_utc();
+        match orders.get_mut(&args.order_id) {
+            Some(order) => {
+                order.paid_amount = args.new_paid_amount;
+                order.status = args.new_status;
+                order.updated_at = time::OffsetDateTime::now_utc();
+                Ok(())
+            }
+            None => Err(sqlx::Error::RowNotFound),
         }
-        Ok(())
     }
 
     async fn update_refund(
@@ -162,46 +372,79 @@ impl super::OrderRepository for MockOrderRepository {
         args: super::OrderRefundUpdateArgs,
     ) -> Result<(), sqlx::Error> {
         let mut orders = self.orders.write().await;
-        if let Some(order) = orders.get_mut(&args.order_id) {
-            order.refunded_amount = args.new_refunded_amount;
-            order.status = args.new_status;
-            order.updated_at = time::OffsetDateTime::now_utc();
+        match orders.get_mut(&args.order_id) {
+            Some(order) => {
+                order.refunded_amount = args.new_refunded_amount;
+                order.status = args.new_status;
+                order.updated_at = time::OffsetDateTime::now_utc();
+                Ok(())
+            }
+            None => Err(sqlx::Error::RowNotFound),
         }
-        Ok(())
     }
 
     async fn update_extra_info(
         &self,
         _conn: &mut Self::Context,
-        _order_id: Uuid,
-        _extra_info: Value,
+        order_id: Uuid,
+        extra_info: Value,
     ) -> Result<(), sqlx::Error> {
-        todo!()
+        let mut orders = self.orders.write().await;
+        match orders.get_mut(&order_id) {
+            Some(order) => {
+                order.extra_info = json_merge(&order.extra_info, &extra_info);
+                order.updated_at = time::OffsetDateTime::now_utc();
+                Ok(())
+            }
+            None => Err(sqlx::Error::RowNotFound),
+        }
     }
 
     async fn update_item_extra_info(
         &self,
         _conn: &mut Self::Context,
-        _item_id: Uuid,
-        _extra_info: Value,
+        item_id: Uuid,
+        extra_info: Value,
     ) -> Result<(), sqlx::Error> {
-        todo!()
+        let mut items = self.order_items.write().await;
+        match items.get_mut(&item_id) {
+            Some((item, _)) => {
+                item.extra_info = json_merge(&item.extra_info, &extra_info);
+                Ok(())
+            }
+            None => Err(sqlx::Error::RowNotFound),
+        }
     }
 
-    async fn cancel_expired_orders(&self, _conn: &mut Self::Context) -> Result<u64, sqlx::Error> {
+    async fn mark_item_refunded(
+        &self,
+        _conn: &mut Self::Context,
+        order_id: Uuid,
+        item_id: Uuid,
+    ) -> Result<(), sqlx::Error> {
+        let mut items = self.order_items.write().await;
+        match items.get_mut(&item_id) {
+            Some((item, _)) if item.order_id == order_id && !item.is_refunded => {
+                item.is_refunded = true;
+                Ok(())
+            }
+            _ => Err(sqlx::Error::RowNotFound),
+        }
+    }
+
+    async fn close_expired_orders(&self, _conn: &mut Self::Context) -> Result<u64, sqlx::Error> {
         let mut orders = self.orders.write().await;
         let mut count = 0;
         let now = time::OffsetDateTime::now_utc();
 
         for order in orders.values_mut() {
-            if order.status == OrderStatus::Pending {
-                if let Some(expire_at) = order.expire_at {
-                    if expire_at < now {
-                        order.status = OrderStatus::Canceled;
-                        order.updated_at = now;
-                        count += 1;
-                    }
-                }
+            if order.status == OrderStatus::Pending
+                && let Some(expire_at) = order.expire_at
+                && expire_at < now
+            {
+                order.status = OrderStatus::Closed;
+                order.updated_at = now;
+                count += 1;
             }
         }
 

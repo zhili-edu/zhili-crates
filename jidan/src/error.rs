@@ -75,6 +75,15 @@ pub enum RefundError {
     #[error("订单不存在: {order_id}")]
     NotFound { order_id: uuid::Uuid },
 
+    #[error("退款订单项不能为空")]
+    EmptyItems,
+
+    #[error("订单项不存在: {item_id}")]
+    ItemNotFound { item_id: uuid::Uuid },
+
+    #[error("订单项已退款: {item_id}")]
+    ItemAlreadyRefunded { item_id: uuid::Uuid },
+
     #[error("退款金额超限: 订单 {order_id}, 已付 {paid}, 已退 {refunded}, 本次 {amount}")]
     AmountExceedsPaid {
         order_id: uuid::Uuid,
