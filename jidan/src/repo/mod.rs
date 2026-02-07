@@ -2,6 +2,7 @@ use crate::{Order, OrderItem, OrderQuery, OrderStatus};
 use async_trait::async_trait;
 use serde_json::Value;
 use sqlx::PgConnection;
+use time::OffsetDateTime;
 use uuid::Uuid;
 
 pub mod mock;
@@ -17,6 +18,7 @@ pub struct OrderCreateArgs {
     pub discount_amount: i64,
     pub payable_amount: i64,
     pub channel_fee: i64,
+    pub expire_at: Option<OffsetDateTime>,
     pub extra_info: Option<Value>,
 }
 
@@ -478,12 +480,12 @@ impl OrderRepository for OrderRepo {
             INSERT INTO jidan.orders (
                 id, user_id, channel, channel_no, status,
                 discount_amount, payable_amount, channel_fee,
-                extra_info
+                expire_at, extra_info
             )
             VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7, $8,
-                $9
+                $9, $10
             )
             "#,
         )
@@ -495,6 +497,7 @@ impl OrderRepository for OrderRepo {
         .bind(args.discount_amount)
         .bind(args.payable_amount)
         .bind(args.channel_fee)
+        .bind(args.expire_at)
         .bind(
             args.extra_info
                 .unwrap_or_else(|| serde_json::Value::Object(Default::default())),

@@ -318,7 +318,7 @@ impl super::OrderRepository for MockOrderRepository {
             channel_fee: args.channel_fee,
             created_at: now,
             updated_at: now,
-            expire_at: None,
+            expire_at: args.expire_at,
             extra_info: args
                 .extra_info
                 .unwrap_or(serde_json::Value::Object(Default::default())),

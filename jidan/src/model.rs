@@ -123,6 +123,7 @@ pub struct CreateOrder {
 
     pub channel_fee: i64,
     pub discount_amount: Option<i64>,
+    pub expire_at: Option<OffsetDateTime>,
 
     pub extra_info: Option<serde_json::Value>,
 }

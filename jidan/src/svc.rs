@@ -140,6 +140,7 @@ impl<C> OrderService<C> {
                     discount_amount,
                     payable_amount,
                     channel_fee,
+                    expire_at: info.expire_at,
                     extra_info: info.extra_info,
                 },
             )
@@ -551,6 +552,7 @@ mod tests {
             }],
             channel_fee: 0,
             discount_amount: Some(0),
+            expire_at: None,
             extra_info: None,
         }
     }
@@ -774,6 +776,25 @@ mod tests {
                 total: 10000
             })
         ));
+    }
+
+    #[tokio::test]
+    async fn test_create_order_with_expire_at() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut info = create_test_order(user_id);
+        let expire_at = time::OffsetDateTime::now_utc() + time::Duration::hours(2);
+        info.expire_at = Some(expire_at);
+
+        let mut conn = ();
+        let order_id = service.create_order(info, &mut conn).await.unwrap();
+
+        let order = service
+            .query_order_optional(&mut conn, &OrderQuery::new(1).id(order_id))
+            .await
+            .unwrap()
+            .unwrap();
+        assert_eq!(order.expire_at, Some(expire_at));
     }
 
     #[tokio::test]
