@@ -15,11 +15,13 @@ pub struct OrderQuery<'a> {
     pub extra_info: Option<&'a Value>,
     pub item_extra_info: Option<&'a Value>,
     pub offset: i64,
-    pub limit: Option<i64>,
+    pub limit: i64,
 }
 
-impl Default for OrderQuery<'_> {
-    fn default() -> Self {
+impl<'a> OrderQuery<'a> {
+    pub fn new(limit: i64) -> Self {
+        assert!(limit > 0, "limit must be > 0");
+
         Self {
             id: None,
             user_id: None,
@@ -32,14 +34,8 @@ impl Default for OrderQuery<'_> {
             extra_info: None,
             item_extra_info: None,
             offset: 0,
-            limit: None,
+            limit,
         }
-    }
-}
-
-impl<'a> OrderQuery<'a> {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn id(mut self, id: Uuid) -> Self {
@@ -93,20 +89,41 @@ impl<'a> OrderQuery<'a> {
     }
 
     pub fn page(mut self, page: i64, page_size: i64) -> Self {
-        let page = (page - 1).max(0);
-        let page_size = page_size.max(0);
-        self.offset = page * page_size;
-        self.limit = Some(page_size);
+        assert!(page > 0, "page must be > 0");
+        assert!(page_size > 0, "limit must be > 0");
+
+        self.offset = (page - 1) * page_size;
+        self.limit = page_size;
         self
     }
 
     pub fn offset(mut self, offset: i64) -> Self {
-        self.offset = offset.max(0);
+        assert!(offset >= 0, "offset must be >= 0");
+        self.offset = offset;
         self
     }
 
-    pub fn limit(mut self, limit: Option<i64>) -> Self {
-        self.limit = limit.map(|limit| limit.max(0));
+    pub fn limit(mut self, limit: i64) -> Self {
+        assert!(limit > 0, "limit must be > 0");
+        self.limit = limit;
         self
+    }
+
+    pub(crate) fn assert_pagination_valid(&self) {
+        assert!(self.offset >= 0, "offset must be >= 0");
+        assert!(self.limit > 0, "limit must be > 0");
+    }
+
+    pub fn has_effective_filters(&self) -> bool {
+        self.id.is_some()
+            || self.user_id.is_some()
+            || self.status.is_some()
+            || self.channel.is_some()
+            || self.channel_no.is_some()
+            || self.created_after.is_some()
+            || self.created_before.is_some()
+            || self.has_skus.is_some_and(|sku_ids| !sku_ids.is_empty())
+            || self.extra_info.is_some()
+            || self.item_extra_info.is_some()
     }
 }

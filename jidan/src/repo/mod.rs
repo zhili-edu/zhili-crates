@@ -141,11 +141,15 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
-        let offset = query.offset.max(0);
-        let limit = query.limit.unwrap_or(i64::MAX);
+        query.assert_pagination_valid();
+        if !query.has_effective_filters() {
+            return Ok(Vec::new());
+        }
+        let offset = query.offset;
+        let limit = query.limit;
 
         let has_skus = match query.has_skus {
-            Some(sku_ids) if sku_ids.is_empty() => None,
+            Some([]) => None,
             Some(sku_ids) => Some(sku_ids),
             None => None,
         };
@@ -207,8 +211,9 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
+        query.assert_pagination_valid();
         let has_skus = match query.has_skus {
-            Some(sku_ids) if sku_ids.is_empty() => None,
+            Some([]) => None,
             Some(sku_ids) => Some(sku_ids),
             None => None,
         };
@@ -267,8 +272,9 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
+        query.assert_pagination_valid();
         let has_skus = match query.has_skus {
-            Some(sku_ids) if sku_ids.is_empty() => None,
+            Some([]) => None,
             Some(sku_ids) => Some(sku_ids),
             None => None,
         };
