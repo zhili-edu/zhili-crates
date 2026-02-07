@@ -72,66 +72,69 @@ impl super::OrderRepository for MockOrderRepository {
         _conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
+        query.assert_pagination_valid();
+        if !query.has_effective_filters() {
+            return Ok(Vec::new());
+        }
         let orders = self.orders.read().await;
         let items = self.order_items.read().await;
         let mut result: Vec<Order> = orders
             .values()
             .filter(|order| {
-                if let Some(id) = query.id {
-                    if order.id != id {
-                        return false;
-                    }
+                if let Some(id) = query.id
+                    && order.id != id
+                {
+                    return false;
                 }
-                if let Some(user_id) = query.user_id {
-                    if order.user_id != user_id {
-                        return false;
-                    }
+                if let Some(user_id) = query.user_id
+                    && order.user_id != user_id
+                {
+                    return false;
                 }
-                if let Some(status) = query.status {
-                    if order.status != status {
-                        return false;
-                    }
+                if let Some(status) = query.status
+                    && order.status != status
+                {
+                    return false;
                 }
-                if let Some(channel) = &query.channel {
-                    if &order.channel != channel {
-                        return false;
-                    }
+                if let Some(channel) = &query.channel
+                    && &order.channel != channel
+                {
+                    return false;
                 }
-                if let Some(channel_no) = &query.channel_no {
-                    if order.channel_no.as_ref() != Some(channel_no) {
-                        return false;
-                    }
+                if let Some(channel_no) = &query.channel_no
+                    && order.channel_no.as_ref() != Some(channel_no)
+                {
+                    return false;
                 }
-                if let Some(after) = query.created_after {
-                    if order.created_at < after {
-                        return false;
-                    }
+                if let Some(after) = query.created_after
+                    && order.created_at < after
+                {
+                    return false;
                 }
-                if let Some(before) = query.created_before {
-                    if order.created_at >= before {
-                        return false;
-                    }
+                if let Some(before) = query.created_before
+                    && order.created_at >= before
+                {
+                    return false;
                 }
-                if let Some(extra) = query.extra_info {
-                    if !json_contains(&order.extra_info, extra) {
-                        return false;
-                    }
+                if let Some(extra) = query.extra_info
+                    && !json_contains(&order.extra_info, extra)
+                {
+                    return false;
                 }
-                if let Some(sku_ids) = &query.has_skus {
-                    if !sku_ids.is_empty()
-                        && !items.values().any(|(item, _)| {
-                            item.order_id == order.id && sku_ids.contains(&item.sku_id)
-                        })
-                    {
-                        return false;
-                    }
+                if let Some(sku_ids) = &query.has_skus
+                    && !sku_ids.is_empty()
+                    && !items.values().any(|(item, _)| {
+                        item.order_id == order.id && sku_ids.contains(&item.sku_id)
+                    })
+                {
+                    return false;
                 }
-                if let Some(item_info) = query.item_extra_info {
-                    if !items.values().any(|(item, _)| {
+                if let Some(item_info) = query.item_extra_info
+                    && !items.values().any(|(item, _)| {
                         item.order_id == order.id && json_contains(&item.extra_info, item_info)
-                    }) {
-                        return false;
-                    }
+                    })
+                {
+                    return false;
                 }
                 true
             })
@@ -140,7 +143,9 @@ impl super::OrderRepository for MockOrderRepository {
 
         result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
-        let offset = query.offset.max(0) as usize;
+        let offset = query.offset as usize;
+        let limit = query.limit;
+
         if offset > 0 {
             if offset >= result.len() {
                 return Ok(Vec::new());
@@ -148,14 +153,9 @@ impl super::OrderRepository for MockOrderRepository {
             result = result.split_off(offset);
         }
 
-        if let Some(limit) = query.limit {
-            if limit <= 0 {
-                return Ok(Vec::new());
-            }
-            let limit = limit as usize;
-            if result.len() > limit {
-                result.truncate(limit);
-            }
+        let limit = limit as usize;
+        if result.len() > limit {
+            result.truncate(limit);
         }
 
         Ok(result)
@@ -166,66 +166,66 @@ impl super::OrderRepository for MockOrderRepository {
         _conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
+        query.assert_pagination_valid();
         let orders = self.orders.read().await;
         let items = self.order_items.read().await;
         let mut result: Vec<Order> = orders
             .values()
             .filter(|order| {
-                if let Some(id) = query.id {
-                    if order.id != id {
-                        return false;
-                    }
+                if let Some(id) = query.id
+                    && order.id != id
+                {
+                    return false;
                 }
-                if let Some(user_id) = query.user_id {
-                    if order.user_id != user_id {
-                        return false;
-                    }
+                if let Some(user_id) = query.user_id
+                    && order.user_id != user_id
+                {
+                    return false;
                 }
-                if let Some(status) = query.status {
-                    if order.status != status {
-                        return false;
-                    }
+                if let Some(status) = query.status
+                    && order.status != status
+                {
+                    return false;
                 }
-                if let Some(channel) = &query.channel {
-                    if &order.channel != channel {
-                        return false;
-                    }
+                if let Some(channel) = &query.channel
+                    && &order.channel != channel
+                {
+                    return false;
                 }
-                if let Some(channel_no) = &query.channel_no {
-                    if order.channel_no.as_ref() != Some(channel_no) {
-                        return false;
-                    }
+                if let Some(channel_no) = &query.channel_no
+                    && order.channel_no.as_ref() != Some(channel_no)
+                {
+                    return false;
                 }
-                if let Some(after) = query.created_after {
-                    if order.created_at < after {
-                        return false;
-                    }
+                if let Some(after) = query.created_after
+                    && order.created_at < after
+                {
+                    return false;
                 }
-                if let Some(before) = query.created_before {
-                    if order.created_at >= before {
-                        return false;
-                    }
+                if let Some(before) = query.created_before
+                    && order.created_at >= before
+                {
+                    return false;
                 }
-                if let Some(extra) = query.extra_info {
-                    if !json_contains(&order.extra_info, extra) {
-                        return false;
-                    }
+                if let Some(extra) = query.extra_info
+                    && !json_contains(&order.extra_info, extra)
+                {
+                    return false;
                 }
-                if let Some(sku_ids) = &query.has_skus {
-                    if !sku_ids.is_empty()
-                        && !items.values().any(|(item, _)| {
-                            item.order_id == order.id && sku_ids.contains(&item.sku_id)
-                        })
-                    {
-                        return false;
-                    }
+                if let Some(sku_ids) = &query.has_skus
+                    && !sku_ids.is_empty()
+                    && !items.values().any(|(item, _)| {
+                        item.order_id == order.id && sku_ids.contains(&item.sku_id)
+                    })
+                {
+                    return false;
                 }
-                if let Some(item_info) = query.item_extra_info {
-                    if !items.values().any(|(item, _)| {
+                if let Some(item_info) = query.item_extra_info
+                    && !items.values().any(|(item, _)| {
                         item.order_id == order.id && json_contains(&item.extra_info, item_info)
-                    }) {
-                        return false;
-                    }
+                    })
+                {
+                    return false;
                 }
                 true
             })

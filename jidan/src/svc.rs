@@ -188,7 +188,7 @@ impl<C> OrderService<C> {
 
         let order = self
             .repo
-            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
+            .query_one_for_update(conn, &OrderQuery::new(1).id(order_id))
             .await
             .map_err(crate::PaymentError::Database)?
             .ok_or_else(|| crate::PaymentError::NotFound { order_id })?;
@@ -257,7 +257,7 @@ impl<C> OrderService<C> {
 
         let order = self
             .repo
-            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
+            .query_one_for_update(conn, &OrderQuery::new(1).id(order_id))
             .await
             .map_err(crate::RefundError::Database)?
             .ok_or_else(|| crate::RefundError::NotFound { order_id })?;
@@ -381,7 +381,7 @@ impl<C> OrderService<C> {
     ) -> Result<(), crate::OrderStatusError> {
         let order = self
             .repo
-            .query_one_for_update(conn, &OrderQuery::new().id(order_id))
+            .query_one_for_update(conn, &OrderQuery::new(1).id(order_id))
             .await
             .map_err(crate::OrderStatusError::Database)?
             .ok_or_else(|| crate::OrderStatusError::NotFound { order_id })?;
@@ -475,7 +475,7 @@ impl<C> OrderService<C> {
         order_id: Uuid,
     ) -> Result<Option<(Order, Vec<OrderItem>)>, sqlx::Error> {
         let order = self
-            .query_order_optional(conn, &OrderQuery::new().id(order_id))
+            .query_order_optional(conn, &OrderQuery::new(1).id(order_id))
             .await?;
 
         match order {
@@ -485,19 +485,6 @@ impl<C> OrderService<C> {
             }
             None => Ok(None),
         }
-    }
-
-    /// 根据sku_ids查询订单
-    pub async fn query_orders_by_skus(
-        &self,
-        conn: &mut C,
-        sku_ids: &[Uuid],
-    ) -> Result<Vec<Order>, sqlx::Error> {
-        if sku_ids.is_empty() {
-            return Ok(vec![]);
-        }
-        self.query_orders(conn, &OrderQuery::new().has_skus(sku_ids))
-            .await
     }
 
     /// 获取一个订单内的所有订单项
@@ -566,7 +553,7 @@ mod tests {
         let order_id = service.create_order(create_info, &mut ()).await.unwrap();
 
         let order = service
-            .query_order_optional(&mut (), &OrderQuery::new().id(order_id))
+            .query_order_optional(&mut (), &OrderQuery::new(1).id(order_id))
             .await
             .unwrap()
             .unwrap();
@@ -878,7 +865,7 @@ mod tests {
         assert_eq!(count, 1);
 
         let order = service
-            .query_order_optional(&mut conn, &OrderQuery::new().id(order_id))
+            .query_order_optional(&mut conn, &OrderQuery::new(1).id(order_id))
             .await
             .unwrap()
             .unwrap();

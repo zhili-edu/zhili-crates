@@ -15,11 +15,13 @@ pub struct OrderQuery<'a> {
     pub extra_info: Option<&'a Value>,
     pub item_extra_info: Option<&'a Value>,
     pub offset: i64,
-    pub limit: Option<i64>,
+    pub limit: i64,
 }
 
-impl Default for OrderQuery<'_> {
-    fn default() -> Self {
+impl<'a> OrderQuery<'a> {
+    pub fn new(limit: i64) -> Self {
+        assert!(limit > 0, "limit must be > 0");
+
         Self {
             id: None,
             user_id: None,
@@ -32,14 +34,8 @@ impl Default for OrderQuery<'_> {
             extra_info: None,
             item_extra_info: None,
             offset: 0,
-            limit: Some(20),
+            limit,
         }
-    }
-}
-
-impl<'a> OrderQuery<'a> {
-    pub fn new() -> Self {
-        Self::default()
     }
 
     pub fn id(mut self, id: Uuid) -> Self {
@@ -93,67 +89,41 @@ impl<'a> OrderQuery<'a> {
     }
 
     pub fn page(mut self, page: i64, page_size: i64) -> Self {
-        self.offset = (page - 1).max(0) * page_size;
-        self.limit = Some(page_size);
+        assert!(page > 0, "page must be > 0");
+        assert!(page_size > 0, "limit must be > 0");
+
+        self.offset = (page - 1) * page_size;
+        self.limit = page_size;
         self
     }
 
     pub fn offset(mut self, offset: i64) -> Self {
+        assert!(offset >= 0, "offset must be >= 0");
         self.offset = offset;
         self
     }
 
-    pub fn limit(mut self, limit: Option<i64>) -> Self {
+    pub fn limit(mut self, limit: i64) -> Self {
+        assert!(limit > 0, "limit must be > 0");
         self.limit = limit;
         self
     }
-}
 
-impl<'a> OrderQuery<'a> {
-    pub(crate) fn apply_filters(&'a self, builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>) {
-        if let Some(id) = self.id {
-            builder.push(" AND id = ");
-            builder.push_bind(id);
-        }
-        if let Some(uid) = self.user_id {
-            builder.push(" AND user_id = ");
-            builder.push_bind(uid);
-        }
-        if let Some(status) = self.status {
-            builder.push(" AND status = ");
-            builder.push_bind(status);
-        }
-        if let Some(channel) = &self.channel {
-            builder.push(" AND channel = ");
-            builder.push_bind(channel.as_str());
-        }
-        if let Some(channel_no) = &self.channel_no {
-            builder.push(" AND channel_no = ");
-            builder.push_bind(channel_no.as_str());
-        }
-        if let Some(after) = self.created_after {
-            builder.push(" AND created_at >= ");
-            builder.push_bind(after);
-        }
-        if let Some(before) = self.created_before {
-            builder.push(" AND created_at < ");
-            builder.push_bind(before);
-        }
-        if let Some(sku_ids) = &self.has_skus
-            && !sku_ids.is_empty()
-        {
-            builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE sku_id = ANY(");
-            builder.push_bind(sku_ids);
-            builder.push("))");
-        }
-        if let Some(info) = self.extra_info {
-            builder.push(" AND extra_info @> ");
-            builder.push_bind(info);
-        }
-        if let Some(item_info) = self.item_extra_info {
-            builder.push(" AND id IN (SELECT order_id FROM jidan.order_items WHERE extra_info @> ");
-            builder.push_bind(item_info);
-            builder.push(")");
-        }
+    pub(crate) fn assert_pagination_valid(&self) {
+        assert!(self.offset >= 0, "offset must be >= 0");
+        assert!(self.limit > 0, "limit must be > 0");
+    }
+
+    pub fn has_effective_filters(&self) -> bool {
+        self.id.is_some()
+            || self.user_id.is_some()
+            || self.status.is_some()
+            || self.channel.is_some()
+            || self.channel_no.is_some()
+            || self.created_after.is_some()
+            || self.created_before.is_some()
+            || self.has_skus.is_some_and(|sku_ids| !sku_ids.is_empty())
+            || self.extra_info.is_some()
+            || self.item_extra_info.is_some()
     }
 }

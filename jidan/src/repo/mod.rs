@@ -1,7 +1,7 @@
 use crate::{Order, OrderItem, OrderQuery, OrderStatus};
 use async_trait::async_trait;
 use serde_json::Value;
-use sqlx::{PgConnection, QueryBuilder};
+use sqlx::PgConnection;
 use uuid::Uuid;
 
 pub mod mock;
@@ -141,34 +141,69 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
-        let mut builder = QueryBuilder::new(
+        query.assert_pagination_valid();
+        if !query.has_effective_filters() {
+            return Ok(Vec::new());
+        }
+        let offset = query.offset;
+        let limit = query.limit;
+
+        let has_skus = match query.has_skus {
+            Some([]) => None,
+            Some(sku_ids) => Some(sku_ids),
+            None => None,
+        };
+
+        sqlx::query_as::<_, Order>(
             r#"
             SELECT
                 id, user_id, channel, channel_no, status,
                 discount_amount, payable_amount, paid_amount, refunded_amount, channel_fee,
                 created_at, updated_at, expire_at, extra_info
             FROM jidan.orders
-            WHERE 1=1
+            WHERE ($1::uuid IS NULL OR id = $1)
+              AND ($2::uuid IS NULL OR user_id = $2)
+              AND ($3::int2 IS NULL OR status = $3)
+              AND ($4::text IS NULL OR channel = $4)
+              AND ($5::text IS NULL OR channel_no = $5)
+              AND ($6::timestamptz IS NULL OR created_at >= $6)
+              AND ($7::timestamptz IS NULL OR created_at < $7)
+              AND (
+                    $8::uuid[] IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE sku_id = ANY($8)
+                    )
+                  )
+              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND (
+                    $10::jsonb IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE extra_info @> $10
+                    )
+                  )
+            ORDER BY created_at DESC
+            LIMIT $11
+            OFFSET $12
             "#,
-        );
-
-        query.apply_filters(&mut builder);
-
-        builder.push(" ORDER BY created_at DESC");
-
-        if let Some(limit) = query.limit {
-            builder.push(" LIMIT ");
-            builder.push_bind(limit);
-        }
-        if query.offset > 0 {
-            builder.push(" OFFSET ");
-            builder.push_bind(query.offset);
-        }
-
-        builder
-            .build_query_as::<Order>()
-            .fetch_all(&mut *conn)
-            .await
+        )
+        .bind(query.id)
+        .bind(query.user_id)
+        .bind(query.status)
+        .bind(query.channel.as_deref())
+        .bind(query.channel_no.as_deref())
+        .bind(query.created_after)
+        .bind(query.created_before)
+        .bind(has_skus)
+        .bind(query.extra_info)
+        .bind(query.item_extra_info)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut *conn)
+        .await
     }
 
     async fn query_one(
@@ -176,27 +211,60 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
-        let mut builder = QueryBuilder::new(
+        query.assert_pagination_valid();
+        let has_skus = match query.has_skus {
+            Some([]) => None,
+            Some(sku_ids) => Some(sku_ids),
+            None => None,
+        };
+
+        sqlx::query_as::<_, Order>(
             r#"
             SELECT
                 id, user_id, channel, channel_no, status,
                 discount_amount, payable_amount, paid_amount, refunded_amount, channel_fee,
                 created_at, updated_at, expire_at, extra_info
             FROM jidan.orders
-            WHERE 1=1
+            WHERE ($1::uuid IS NULL OR id = $1)
+              AND ($2::uuid IS NULL OR user_id = $2)
+              AND ($3::int2 IS NULL OR status = $3)
+              AND ($4::text IS NULL OR channel = $4)
+              AND ($5::text IS NULL OR channel_no = $5)
+              AND ($6::timestamptz IS NULL OR created_at >= $6)
+              AND ($7::timestamptz IS NULL OR created_at < $7)
+              AND (
+                    $8::uuid[] IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE sku_id = ANY($8)
+                    )
+                  )
+              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND (
+                    $10::jsonb IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE extra_info @> $10
+                    )
+                  )
+            ORDER BY created_at DESC
+            LIMIT 1
             "#,
-        );
-
-        query.apply_filters(&mut builder);
-
-        builder.push(" ORDER BY created_at DESC");
-
-        builder.push(" LIMIT 1");
-
-        builder
-            .build_query_as::<Order>()
-            .fetch_optional(&mut *conn)
-            .await
+        )
+        .bind(query.id)
+        .bind(query.user_id)
+        .bind(query.status)
+        .bind(query.channel.as_deref())
+        .bind(query.channel_no.as_deref())
+        .bind(query.created_after)
+        .bind(query.created_before)
+        .bind(has_skus)
+        .bind(query.extra_info)
+        .bind(query.item_extra_info)
+        .fetch_optional(&mut *conn)
+        .await
     }
 
     async fn query_one_for_update(
@@ -204,26 +272,61 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
-        let mut builder = QueryBuilder::new(
+        query.assert_pagination_valid();
+        let has_skus = match query.has_skus {
+            Some([]) => None,
+            Some(sku_ids) => Some(sku_ids),
+            None => None,
+        };
+
+        sqlx::query_as::<_, Order>(
             r#"
             SELECT
                 id, user_id, channel, channel_no, status,
                 discount_amount, payable_amount, paid_amount, refunded_amount, channel_fee,
                 created_at, updated_at, expire_at, extra_info
             FROM jidan.orders
-            WHERE 1=1
+            WHERE ($1::uuid IS NULL OR id = $1)
+              AND ($2::uuid IS NULL OR user_id = $2)
+              AND ($3::int2 IS NULL OR status = $3)
+              AND ($4::text IS NULL OR channel = $4)
+              AND ($5::text IS NULL OR channel_no = $5)
+              AND ($6::timestamptz IS NULL OR created_at >= $6)
+              AND ($7::timestamptz IS NULL OR created_at < $7)
+              AND (
+                    $8::uuid[] IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE sku_id = ANY($8)
+                    )
+                  )
+              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND (
+                    $10::jsonb IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE extra_info @> $10
+                    )
+                  )
+            ORDER BY created_at DESC
+            LIMIT 1
+            FOR UPDATE
             "#,
-        );
-
-        query.apply_filters(&mut builder);
-
-        builder.push(" ORDER BY created_at DESC");
-        builder.push(" LIMIT 1 FOR UPDATE");
-
-        builder
-            .build_query_as::<Order>()
-            .fetch_optional(&mut *conn)
-            .await
+        )
+        .bind(query.id)
+        .bind(query.user_id)
+        .bind(query.status)
+        .bind(query.channel.as_deref())
+        .bind(query.channel_no.as_deref())
+        .bind(query.created_after)
+        .bind(query.created_before)
+        .bind(has_skus)
+        .bind(query.extra_info)
+        .bind(query.item_extra_info)
+        .fetch_optional(&mut *conn)
+        .await
     }
 
     async fn get_orders_items(
