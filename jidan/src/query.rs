@@ -32,7 +32,7 @@ impl Default for OrderQuery<'_> {
             extra_info: None,
             item_extra_info: None,
             offset: 0,
-            limit: Some(20),
+            limit: None,
         }
     }
 }
@@ -93,18 +93,20 @@ impl<'a> OrderQuery<'a> {
     }
 
     pub fn page(mut self, page: i64, page_size: i64) -> Self {
-        self.offset = (page - 1).max(0) * page_size;
+        let page = (page - 1).max(0);
+        let page_size = page_size.max(0);
+        self.offset = page * page_size;
         self.limit = Some(page_size);
         self
     }
 
     pub fn offset(mut self, offset: i64) -> Self {
-        self.offset = offset;
+        self.offset = offset.max(0);
         self
     }
 
     pub fn limit(mut self, limit: Option<i64>) -> Self {
-        self.limit = limit;
+        self.limit = limit.map(|limit| limit.max(0));
         self
     }
 }

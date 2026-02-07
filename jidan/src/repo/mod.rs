@@ -141,6 +141,9 @@ impl OrderRepository for OrderRepo {
         conn: &mut Self::Context,
         query: &OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error> {
+        let offset = query.offset.max(0);
+        let limit = query.limit.unwrap_or(i64::MAX);
+
         let has_skus = match query.has_skus {
             Some(sku_ids) if sku_ids.is_empty() => None,
             Some(sku_ids) => Some(sku_ids),
@@ -180,7 +183,7 @@ impl OrderRepository for OrderRepo {
                   )
             ORDER BY created_at DESC
             LIMIT $11
-            OFFSET GREATEST($12, 0)
+            OFFSET $12
             "#,
         )
         .bind(query.id)
@@ -193,8 +196,8 @@ impl OrderRepository for OrderRepo {
         .bind(has_skus)
         .bind(query.extra_info)
         .bind(query.item_extra_info)
-        .bind(query.limit)
-        .bind(query.offset)
+        .bind(limit)
+        .bind(offset)
         .fetch_all(&mut *conn)
         .await
     }

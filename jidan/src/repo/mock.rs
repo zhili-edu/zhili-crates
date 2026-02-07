@@ -141,6 +141,8 @@ impl super::OrderRepository for MockOrderRepository {
         result.sort_by(|a, b| b.created_at.cmp(&a.created_at));
 
         let offset = query.offset.max(0) as usize;
+        let limit = query.limit.unwrap_or(i64::MAX);
+
         if offset > 0 {
             if offset >= result.len() {
                 return Ok(Vec::new());
@@ -148,14 +150,12 @@ impl super::OrderRepository for MockOrderRepository {
             result = result.split_off(offset);
         }
 
-        if let Some(limit) = query.limit {
-            if limit <= 0 {
-                return Ok(Vec::new());
-            }
-            let limit = limit as usize;
-            if result.len() > limit {
-                result.truncate(limit);
-            }
+        if limit <= 0 {
+            return Ok(Vec::new());
+        }
+        let limit = limit as usize;
+        if result.len() > limit {
+            result.truncate(limit);
         }
 
         Ok(result)
