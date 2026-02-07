@@ -96,6 +96,13 @@ impl super::OrderRepository for MockOrderRepository {
                 {
                     return false;
                 }
+                if let Some(expired) = query.expired {
+                    let now = time::OffsetDateTime::now_utc();
+                    let is_expired = order.expire_at.is_some_and(|t| t < now);
+                    if is_expired != expired {
+                        return false;
+                    }
+                }
                 if let Some(channel) = &query.channel
                     && &order.channel != channel
                 {
@@ -187,6 +194,13 @@ impl super::OrderRepository for MockOrderRepository {
                 {
                     return false;
                 }
+                if let Some(expired) = query.expired {
+                    let now = time::OffsetDateTime::now_utc();
+                    let is_expired = order.expire_at.is_some_and(|t| t < now);
+                    if is_expired != expired {
+                        return false;
+                    }
+                }
                 if let Some(channel) = &query.channel
                     && &order.channel != channel
                 {
@@ -242,6 +256,14 @@ impl super::OrderRepository for MockOrderRepository {
         query: &OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error> {
         self.query_one(conn, query).await
+    }
+
+    async fn query_for_update_skip_locked(
+        &self,
+        conn: &mut Self::Context,
+        query: &OrderQuery<'_>,
+    ) -> Result<Vec<Order>, sqlx::Error> {
+        self.query(conn, query).await
     }
 
     async fn get_orders_items(

@@ -7,6 +7,7 @@ pub struct OrderQuery<'a> {
     pub id: Option<Uuid>,
     pub user_id: Option<Uuid>,
     pub status: Option<crate::OrderStatus>,
+    pub expired: Option<bool>,
     pub channel: Option<String>,
     pub channel_no: Option<String>,
     pub created_after: Option<OffsetDateTime>,
@@ -26,6 +27,7 @@ impl<'a> OrderQuery<'a> {
             id: None,
             user_id: None,
             status: None,
+            expired: None,
             channel: None,
             channel_no: None,
             created_after: None,
@@ -50,6 +52,11 @@ impl<'a> OrderQuery<'a> {
 
     pub fn status(mut self, status: crate::OrderStatus) -> Self {
         self.status = Some(status);
+        self
+    }
+
+    pub fn expired(mut self, expired: bool) -> Self {
+        self.expired = Some(expired);
         self
     }
 
@@ -118,6 +125,7 @@ impl<'a> OrderQuery<'a> {
         self.id.is_some()
             || self.user_id.is_some()
             || self.status.is_some()
+            || self.expired.is_some()
             || self.channel.is_some()
             || self.channel_no.is_some()
             || self.created_after.is_some()

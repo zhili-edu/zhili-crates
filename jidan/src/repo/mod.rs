@@ -68,6 +68,12 @@ pub trait OrderRepository: Send + Sync + std::fmt::Debug {
         query: &crate::OrderQuery<'_>,
     ) -> Result<Option<Order>, sqlx::Error>;
 
+    async fn query_for_update_skip_locked(
+        &self,
+        conn: &mut Self::Context,
+        query: &crate::OrderQuery<'_>,
+    ) -> Result<Vec<Order>, sqlx::Error>;
+
     async fn get_orders_items(
         &self,
         conn: &mut Self::Context,
@@ -164,35 +170,41 @@ impl OrderRepository for OrderRepo {
             WHERE ($1::uuid IS NULL OR id = $1)
               AND ($2::uuid IS NULL OR user_id = $2)
               AND ($3::int2 IS NULL OR status = $3)
-              AND ($4::text IS NULL OR channel = $4)
-              AND ($5::text IS NULL OR channel_no = $5)
-              AND ($6::timestamptz IS NULL OR created_at >= $6)
-              AND ($7::timestamptz IS NULL OR created_at < $7)
               AND (
-                    $8::uuid[] IS NULL
+                    $4::bool IS NULL
+                    OR ($4 = true AND expire_at IS NOT NULL AND expire_at < now())
+                    OR ($4 = false AND (expire_at IS NULL OR expire_at >= now()))
+                  )
+              AND ($5::text IS NULL OR channel = $5)
+              AND ($6::text IS NULL OR channel_no = $6)
+              AND ($7::timestamptz IS NULL OR created_at >= $7)
+              AND ($8::timestamptz IS NULL OR created_at < $8)
+              AND (
+                    $9::uuid[] IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE sku_id = ANY($8)
+                        WHERE sku_id = ANY($9)
                     )
                   )
-              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND ($10::jsonb IS NULL OR extra_info @> $10)
               AND (
-                    $10::jsonb IS NULL
+                    $11::jsonb IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE extra_info @> $10
+                        WHERE extra_info @> $11
                     )
                   )
             ORDER BY created_at DESC
-            LIMIT $11
-            OFFSET $12
+            LIMIT $12
+            OFFSET $13
             "#,
         )
         .bind(query.id)
         .bind(query.user_id)
         .bind(query.status)
+        .bind(query.expired)
         .bind(query.channel.as_deref())
         .bind(query.channel_no.as_deref())
         .bind(query.created_after)
@@ -228,25 +240,30 @@ impl OrderRepository for OrderRepo {
             WHERE ($1::uuid IS NULL OR id = $1)
               AND ($2::uuid IS NULL OR user_id = $2)
               AND ($3::int2 IS NULL OR status = $3)
-              AND ($4::text IS NULL OR channel = $4)
-              AND ($5::text IS NULL OR channel_no = $5)
-              AND ($6::timestamptz IS NULL OR created_at >= $6)
-              AND ($7::timestamptz IS NULL OR created_at < $7)
               AND (
-                    $8::uuid[] IS NULL
+                    $4::bool IS NULL
+                    OR ($4 = true AND expire_at IS NOT NULL AND expire_at < now())
+                    OR ($4 = false AND (expire_at IS NULL OR expire_at >= now()))
+                  )
+              AND ($5::text IS NULL OR channel = $5)
+              AND ($6::text IS NULL OR channel_no = $6)
+              AND ($7::timestamptz IS NULL OR created_at >= $7)
+              AND ($8::timestamptz IS NULL OR created_at < $8)
+              AND (
+                    $9::uuid[] IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE sku_id = ANY($8)
+                        WHERE sku_id = ANY($9)
                     )
                   )
-              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND ($10::jsonb IS NULL OR extra_info @> $10)
               AND (
-                    $10::jsonb IS NULL
+                    $11::jsonb IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE extra_info @> $10
+                        WHERE extra_info @> $11
                     )
                   )
             ORDER BY created_at DESC
@@ -256,6 +273,7 @@ impl OrderRepository for OrderRepo {
         .bind(query.id)
         .bind(query.user_id)
         .bind(query.status)
+        .bind(query.expired)
         .bind(query.channel.as_deref())
         .bind(query.channel_no.as_deref())
         .bind(query.created_after)
@@ -289,25 +307,30 @@ impl OrderRepository for OrderRepo {
             WHERE ($1::uuid IS NULL OR id = $1)
               AND ($2::uuid IS NULL OR user_id = $2)
               AND ($3::int2 IS NULL OR status = $3)
-              AND ($4::text IS NULL OR channel = $4)
-              AND ($5::text IS NULL OR channel_no = $5)
-              AND ($6::timestamptz IS NULL OR created_at >= $6)
-              AND ($7::timestamptz IS NULL OR created_at < $7)
               AND (
-                    $8::uuid[] IS NULL
+                    $4::bool IS NULL
+                    OR ($4 = true AND expire_at IS NOT NULL AND expire_at < now())
+                    OR ($4 = false AND (expire_at IS NULL OR expire_at >= now()))
+                  )
+              AND ($5::text IS NULL OR channel = $5)
+              AND ($6::text IS NULL OR channel_no = $6)
+              AND ($7::timestamptz IS NULL OR created_at >= $7)
+              AND ($8::timestamptz IS NULL OR created_at < $8)
+              AND (
+                    $9::uuid[] IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE sku_id = ANY($8)
+                        WHERE sku_id = ANY($9)
                     )
                   )
-              AND ($9::jsonb IS NULL OR extra_info @> $9)
+              AND ($10::jsonb IS NULL OR extra_info @> $10)
               AND (
-                    $10::jsonb IS NULL
+                    $11::jsonb IS NULL
                     OR id IN (
                         SELECT order_id
                         FROM jidan.order_items
-                        WHERE extra_info @> $10
+                        WHERE extra_info @> $11
                     )
                   )
             ORDER BY created_at DESC
@@ -318,6 +341,7 @@ impl OrderRepository for OrderRepo {
         .bind(query.id)
         .bind(query.user_id)
         .bind(query.status)
+        .bind(query.expired)
         .bind(query.channel.as_deref())
         .bind(query.channel_no.as_deref())
         .bind(query.created_after)
@@ -326,6 +350,83 @@ impl OrderRepository for OrderRepo {
         .bind(query.extra_info)
         .bind(query.item_extra_info)
         .fetch_optional(&mut *conn)
+        .await
+    }
+
+    async fn query_for_update_skip_locked(
+        &self,
+        conn: &mut Self::Context,
+        query: &OrderQuery<'_>,
+    ) -> Result<Vec<Order>, sqlx::Error> {
+        query.assert_pagination_valid();
+        if !query.has_effective_filters() {
+            return Ok(Vec::new());
+        }
+        let offset = query.offset;
+        let limit = query.limit;
+
+        let has_skus = match query.has_skus {
+            Some([]) => None,
+            Some(sku_ids) => Some(sku_ids),
+            None => None,
+        };
+
+        sqlx::query_as::<_, Order>(
+            r#"
+            SELECT
+                id, user_id, channel, channel_no, status,
+                discount_amount, payable_amount, paid_amount, refunded_amount, channel_fee,
+                created_at, updated_at, expire_at, extra_info
+            FROM jidan.orders
+            WHERE ($1::uuid IS NULL OR id = $1)
+              AND ($2::uuid IS NULL OR user_id = $2)
+              AND ($3::int2 IS NULL OR status = $3)
+              AND (
+                    $4::bool IS NULL
+                    OR ($4 = true AND expire_at IS NOT NULL AND expire_at < now())
+                    OR ($4 = false AND (expire_at IS NULL OR expire_at >= now()))
+                  )
+              AND ($5::text IS NULL OR channel = $5)
+              AND ($6::text IS NULL OR channel_no = $6)
+              AND ($7::timestamptz IS NULL OR created_at >= $7)
+              AND ($8::timestamptz IS NULL OR created_at < $8)
+              AND (
+                    $9::uuid[] IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE sku_id = ANY($9)
+                    )
+                  )
+              AND ($10::jsonb IS NULL OR extra_info @> $10)
+              AND (
+                    $11::jsonb IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE extra_info @> $11
+                    )
+                  )
+            ORDER BY created_at DESC
+            LIMIT $12
+            OFFSET $13
+            FOR UPDATE SKIP LOCKED
+            "#,
+        )
+        .bind(query.id)
+        .bind(query.user_id)
+        .bind(query.status)
+        .bind(query.expired)
+        .bind(query.channel.as_deref())
+        .bind(query.channel_no.as_deref())
+        .bind(query.created_after)
+        .bind(query.created_before)
+        .bind(has_skus)
+        .bind(query.extra_info)
+        .bind(query.item_extra_info)
+        .bind(limit)
+        .bind(offset)
+        .fetch_all(&mut *conn)
         .await
     }
 
