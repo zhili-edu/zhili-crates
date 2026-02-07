@@ -460,6 +460,14 @@ impl<C> OrderService<C> {
         self.repo.query(conn, query).await
     }
 
+    pub async fn query_orders_for_update_skip_locked(
+        &self,
+        conn: &mut C,
+        query: &OrderQuery<'_>,
+    ) -> Result<Vec<Order>, sqlx::Error> {
+        self.repo.query_for_update_skip_locked(conn, query).await
+    }
+
     pub async fn query_order_optional(
         &self,
         conn: &mut C,
@@ -870,5 +878,71 @@ mod tests {
             .unwrap()
             .unwrap();
         assert_eq!(order.status, OrderStatus::Closed);
+    }
+
+    #[tokio::test]
+    async fn test_query_orders_with_expired_filter() {
+        let (service, mock_repo) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        let expired_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let active_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+
+        {
+            let mut orders = mock_repo.orders.write().await;
+            let expired_order = orders.get_mut(&expired_order_id).unwrap();
+            expired_order.expire_at =
+                Some(time::OffsetDateTime::now_utc() - time::Duration::seconds(1));
+
+            let active_order = orders.get_mut(&active_order_id).unwrap();
+            active_order.expire_at =
+                Some(time::OffsetDateTime::now_utc() + time::Duration::hours(1));
+        }
+
+        let expired = service
+            .query_orders(&mut conn, &OrderQuery::new(10).expired(true))
+            .await
+            .unwrap();
+        assert_eq!(expired.len(), 1);
+        assert_eq!(expired[0].id, expired_order_id);
+
+        let not_expired = service
+            .query_orders(&mut conn, &OrderQuery::new(10).expired(false))
+            .await
+            .unwrap();
+        assert_eq!(not_expired.len(), 1);
+        assert_eq!(not_expired[0].id, active_order_id);
+    }
+
+    #[tokio::test]
+    async fn test_query_orders_for_update_skip_locked() {
+        let (service, mock_repo) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        let order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+
+        {
+            let mut orders = mock_repo.orders.write().await;
+            let order = orders.get_mut(&order_id).unwrap();
+            order.expire_at = Some(time::OffsetDateTime::now_utc() - time::Duration::seconds(1));
+        }
+
+        let orders = service
+            .query_orders_for_update_skip_locked(&mut conn, &OrderQuery::new(10).expired(true))
+            .await
+            .unwrap();
+        assert_eq!(orders.len(), 1);
+        assert_eq!(orders[0].id, order_id);
     }
 }
