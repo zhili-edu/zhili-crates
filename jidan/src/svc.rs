@@ -453,6 +453,14 @@ impl<C> OrderService<C> {
 }
 
 impl<C> OrderService<C> {
+    pub async fn count_orders(
+        &self,
+        conn: &mut C,
+        query: &OrderQuery<'_>,
+    ) -> Result<i64, sqlx::Error> {
+        self.repo.count(conn, query).await
+    }
+
     pub async fn query_orders(
         &self,
         conn: &mut C,
@@ -940,6 +948,62 @@ mod tests {
             .unwrap();
         assert_eq!(not_expired.len(), 1);
         assert_eq!(not_expired[0].id, active_order_id);
+    }
+
+    #[tokio::test]
+    async fn test_count_orders_with_status_filter() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        let pending_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let fulfilled_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+
+        service
+            .add_payment(fulfilled_order_id, 10000, &mut conn)
+            .await
+            .unwrap();
+
+        let pending_count = service
+            .count_orders(&mut conn, &OrderQuery::new(10).status(OrderStatus::Pending))
+            .await
+            .unwrap();
+        let fulfilled_count = service
+            .count_orders(
+                &mut conn,
+                &OrderQuery::new(10).status(OrderStatus::Fulfilled),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(pending_count, 1);
+        assert_eq!(fulfilled_count, 1);
+        assert_ne!(pending_order_id, fulfilled_order_id);
+    }
+
+    #[tokio::test]
+    async fn test_count_orders_without_filters_returns_total() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+
+        let count = service
+            .count_orders(&mut conn, &OrderQuery::new(10))
+            .await
+            .unwrap();
+
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]

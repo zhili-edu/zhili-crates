@@ -58,6 +58,12 @@ pub trait OrderRepository: Send + Sync + std::fmt::Debug {
         query: &crate::OrderQuery<'_>,
     ) -> Result<Vec<Order>, sqlx::Error>;
 
+    async fn count(
+        &self,
+        conn: &mut Self::Context,
+        query: &crate::OrderQuery<'_>,
+    ) -> Result<i64, sqlx::Error>;
+
     async fn query_one(
         &self,
         conn: &mut Self::Context,
@@ -217,6 +223,67 @@ impl OrderRepository for OrderRepo {
         .bind(limit)
         .bind(offset)
         .fetch_all(&mut *conn)
+        .await
+    }
+
+    async fn count(
+        &self,
+        conn: &mut Self::Context,
+        query: &OrderQuery<'_>,
+    ) -> Result<i64, sqlx::Error> {
+        let has_skus = match query.has_skus {
+            Some([]) => None,
+            Some(sku_ids) => Some(sku_ids),
+            None => None,
+        };
+
+        sqlx::query_scalar::<_, i64>(
+            r#"
+            SELECT COUNT(*)
+            FROM jidan.orders
+            WHERE ($1::uuid IS NULL OR id = $1)
+              AND ($2::uuid IS NULL OR user_id = $2)
+              AND ($3::int2 IS NULL OR status = $3)
+              AND (
+                    $4::bool IS NULL
+                    OR ($4 = true AND expire_at IS NOT NULL AND expire_at < now())
+                    OR ($4 = false AND (expire_at IS NULL OR expire_at >= now()))
+                  )
+              AND ($5::text IS NULL OR channel = $5)
+              AND ($6::text IS NULL OR channel_no = $6)
+              AND ($7::timestamptz IS NULL OR created_at >= $7)
+              AND ($8::timestamptz IS NULL OR created_at < $8)
+              AND (
+                    $9::uuid[] IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE sku_id = ANY($9)
+                    )
+                  )
+              AND ($10::jsonb IS NULL OR extra_info @> $10)
+              AND (
+                    $11::jsonb IS NULL
+                    OR id IN (
+                        SELECT order_id
+                        FROM jidan.order_items
+                        WHERE extra_info @> $11
+                    )
+                  )
+            "#,
+        )
+        .bind(query.id)
+        .bind(query.user_id)
+        .bind(query.status)
+        .bind(query.expired)
+        .bind(query.channel.as_deref())
+        .bind(query.channel_no.as_deref())
+        .bind(query.created_after)
+        .bind(query.created_before)
+        .bind(has_skus)
+        .bind(query.extra_info)
+        .bind(query.item_extra_info)
+        .fetch_one(&mut *conn)
         .await
     }
 

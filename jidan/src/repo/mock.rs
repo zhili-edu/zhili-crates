@@ -168,6 +168,85 @@ impl super::OrderRepository for MockOrderRepository {
         Ok(result)
     }
 
+    async fn count(
+        &self,
+        _conn: &mut Self::Context,
+        query: &OrderQuery<'_>,
+    ) -> Result<i64, sqlx::Error> {
+        let orders = self.orders.read().await;
+        let items = self.order_items.read().await;
+        let count = orders
+            .values()
+            .filter(|order| {
+                if let Some(id) = query.id
+                    && order.id != id
+                {
+                    return false;
+                }
+                if let Some(user_id) = query.user_id
+                    && order.user_id != user_id
+                {
+                    return false;
+                }
+                if let Some(status) = query.status
+                    && order.status != status
+                {
+                    return false;
+                }
+                if let Some(expired) = query.expired {
+                    let now = time::OffsetDateTime::now_utc();
+                    let is_expired = order.expire_at.is_some_and(|t| t < now);
+                    if is_expired != expired {
+                        return false;
+                    }
+                }
+                if let Some(channel) = &query.channel
+                    && &order.channel != channel
+                {
+                    return false;
+                }
+                if let Some(channel_no) = &query.channel_no
+                    && order.channel_no.as_ref() != Some(channel_no)
+                {
+                    return false;
+                }
+                if let Some(after) = query.created_after
+                    && order.created_at < after
+                {
+                    return false;
+                }
+                if let Some(before) = query.created_before
+                    && order.created_at >= before
+                {
+                    return false;
+                }
+                if let Some(extra) = query.extra_info
+                    && !json_contains(&order.extra_info, extra)
+                {
+                    return false;
+                }
+                if let Some(sku_ids) = &query.has_skus
+                    && !sku_ids.is_empty()
+                    && !items.values().any(|(item, _)| {
+                        item.order_id == order.id && sku_ids.contains(&item.sku_id)
+                    })
+                {
+                    return false;
+                }
+                if let Some(item_info) = query.item_extra_info
+                    && !items.values().any(|(item, _)| {
+                        item.order_id == order.id && json_contains(&item.extra_info, item_info)
+                    })
+                {
+                    return false;
+                }
+                true
+            })
+            .count() as i64;
+
+        Ok(count)
+    }
+
     async fn query_one(
         &self,
         _conn: &mut Self::Context,
