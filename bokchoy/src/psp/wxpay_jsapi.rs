@@ -343,6 +343,72 @@ impl PaymentServiceProvider for WxPayJsapi {
         }
     }
 
+    async fn close(&self, id: Uuid) -> (HttpRequestJson, Option<HttpResponseJson>) {
+        let api_path = format!("/v3/pay/transactions/out-trade-no/{}/close", id.simple());
+
+        let body = json!({
+            "mchid": self.mchid
+        });
+
+        let body_str = serde_json::to_string(&body).unwrap();
+
+        let auth_header = get_body_auth_header(
+            &self.mchid,
+            self.merchant_cert_private_key.clone(),
+            &self.merchant_cert_serial_no,
+            http::Method::POST,
+            &api_path,
+            &body_str,
+        );
+
+        let req_http = self
+            .reqwest
+            .post(format!("https://api.mch.weixin.qq.com{api_path}"))
+            .body(body_str)
+            .header("Authorization", auth_header)
+            .header("User-Agent", "bokchoy")
+            .header("Accept", "application/json")
+            .header("Content-Type", "application/json")
+            .build()
+            .unwrap();
+
+        let http_req = HttpRequestJson::from_reqwest_req(&req_http, body);
+
+        let res = self.reqwest.execute(req_http).await.unwrap();
+
+        let status = res.status().as_u16();
+
+        let headers = res
+            .headers()
+            .iter()
+            .filter_map(|(k, v)| v.to_str().map(|v| (k.to_string(), v.to_string())).ok())
+            .collect::<Vec<_>>();
+
+        let body_text = res.text().await.unwrap_or_default();
+
+        let body = if body_text.is_empty() {
+            serde_json::Value::Null
+        } else {
+            serde_json::from_str::<serde_json::Value>(&body_text)
+                .unwrap_or(serde_json::Value::String(body_text))
+        };
+
+        let http_res = HttpResponseJson {
+            status,
+            headers,
+            body,
+        };
+
+        if (200..300).contains(&status) {
+            (http_req, Some(http_res))
+        } else {
+            panic!(
+                "Close payment failed: status={}, body={}",
+                status, http_res.body
+            );
+        }
+    }
+
     async fn refund_callback(
         &self,
         req: http::Request<bytes::Bytes>,

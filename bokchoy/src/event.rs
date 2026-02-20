@@ -90,6 +90,7 @@ pub enum PaymentEventKind {
     PaymentCallback = 1,
     PaymentRefund = 2,
     RefundCallback = 3,
+    PaymentClose = 4,
 }
 
 impl sqlx::Type<sqlx::Postgres> for PaymentEventKind {
@@ -123,6 +124,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for PaymentEventKind {
             1 => Ok(PaymentEventKind::PaymentCallback),
             2 => Ok(PaymentEventKind::PaymentRefund),
             3 => Ok(PaymentEventKind::RefundCallback),
+            4 => Ok(PaymentEventKind::PaymentClose),
             _ => Err(format!("Invalid PaymentStatus value: {}", val).into()),
         }
     }

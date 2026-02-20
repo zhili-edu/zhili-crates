@@ -72,6 +72,8 @@ pub(crate) trait PaymentServiceProvider: Send + Sync {
         req: RefundRequest,
     ) -> (RefundResponse, HttpRequestJson, Option<HttpResponseJson>);
 
+    async fn close(&self, id: Uuid) -> (HttpRequestJson, Option<HttpResponseJson>);
+
     async fn refund_callback(
         &self,
         req: http::Request<bytes::Bytes>,

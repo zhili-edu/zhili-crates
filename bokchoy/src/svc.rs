@@ -128,6 +128,53 @@ impl<C> PaymentService<C> {
         res
     }
 
+    pub async fn close_payment(&self, conn: &mut C, payment_id: Uuid) {
+        let payment = self
+            .repo
+            .query_payment_optional(conn, &PaymentQuery::new().id(payment_id))
+            .await
+            .unwrap()
+            .unwrap();
+
+        assert_eq!(
+            payment.status,
+            PaymentStatus::Pending,
+            "Only pending payments can be closed",
+        );
+
+        let provider = self.providers.get(&payment.provider).unwrap();
+
+        let (http_req, http_res) = provider.close(payment_id).await;
+
+        self.repo
+            .update_payment(
+                conn,
+                payment_id,
+                PaymentUpdate {
+                    status: Some(PaymentStatus::Closed),
+                    provider_trade_no: None,
+                    success_at: None,
+                    add_to_refunded_amount: None,
+                },
+            )
+            .await
+            .unwrap()
+            .unwrap();
+
+        self.repo
+            .create_payment_event(
+                conn,
+                PaymentEventCreate {
+                    payment_id,
+                    kind: PaymentEventKind::PaymentClose,
+                    http_req,
+                    http_res,
+                },
+            )
+            .await
+            .unwrap();
+    }
+
     pub async fn handle_pay_callback(
         &self,
         conn: &mut C,

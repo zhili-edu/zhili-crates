@@ -60,6 +60,7 @@ pub enum PaymentStatus {
     Success = 10,
     Failed = 20,
     Refunded = 30,
+    Closed = 40,
 }
 
 impl sqlx::Type<sqlx::Postgres> for PaymentStatus {
@@ -93,6 +94,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for PaymentStatus {
             10 => Ok(PaymentStatus::Success),
             20 => Ok(PaymentStatus::Failed),
             30 => Ok(PaymentStatus::Refunded),
+            40 => Ok(PaymentStatus::Closed),
             _ => Err(format!("Invalid PaymentStatus value: {}", val).into()),
         }
     }
