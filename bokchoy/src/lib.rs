@@ -183,6 +183,7 @@ pub struct PaymentRecord {
     pub provider: Provider,
     pub status: PaymentStatus,
     pub success_at: Option<time::OffsetDateTime>,
+    pub expire_at: Option<time::OffsetDateTime>,
 }
 
 #[derive(Debug, Clone, sqlx::FromRow)]

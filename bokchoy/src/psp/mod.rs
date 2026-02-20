@@ -13,6 +13,7 @@ pub struct PayRequest {
     pub biz_id: Uuid,
     pub amount: i64,
     pub description: String,
+    pub expire_at: Option<OffsetDateTime>,
     pub extras: HashMap<String, String>,
 }
 
