@@ -60,6 +60,7 @@ pub struct PaymentCreate {
     pub provider: Provider,
     pub provider_trade_no: Option<String>,
     pub success_at: Option<time::OffsetDateTime>,
+    pub expire_at: Option<time::OffsetDateTime>,
 }
 
 pub struct PaymentUpdate {
@@ -160,7 +161,7 @@ impl PaymentRepository for PaymentRepo {
             r#"
             SELECT
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at
+                biz_id, provider, status, success_at, expire_at
             FROM bokchoy.payments
             WHERE 1=1
             "#,
@@ -185,7 +186,7 @@ impl PaymentRepository for PaymentRepo {
             r#"
             SELECT
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at
+                biz_id, provider, status, success_at, expire_at
             FROM bokchoy.payments
             WHERE 1=1
             "#,
@@ -212,12 +213,12 @@ impl PaymentRepository for PaymentRepo {
             INSERT INTO bokchoy.payments (
                 provider_trade_no, description, status, amount, refunded_amount,
                 biz_id, provider,
-                created_at, updated_at, success_at
+                created_at, updated_at, success_at, expire_at
             )
             VALUES (
                 $1, $2, $3, $4, $5,
                 $6, $7,
-                now(), now(), $8
+                now(), now(), $8, $9
             )
             RETURNING id
             "#,
@@ -230,6 +231,7 @@ impl PaymentRepository for PaymentRepo {
         .bind(info.biz_id)
         .bind(info.provider)
         .bind(info.success_at)
+        .bind(info.expire_at)
         .fetch_one(conn)
         .await
     }
@@ -252,7 +254,7 @@ impl PaymentRepository for PaymentRepo {
             WHERE id = $1
             RETURNING
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at
+                biz_id, provider, status, success_at, expire_at
             "#,
         )
         .bind(id)

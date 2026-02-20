@@ -81,6 +81,7 @@ impl<C> PaymentService<C> {
                     provider: req.provider,
                     provider_trade_no: Some(req.provider_trade_no),
                     success_at: Some(req.success_at),
+                    expire_at: None,
                 },
             )
             .await?;
@@ -103,6 +104,7 @@ impl<C> PaymentService<C> {
                     provider: key,
                     provider_trade_no: None,
                     success_at: None,
+                    expire_at: req.expire_at,
                 },
             )
             .await

@@ -3,7 +3,7 @@ use aes_gcm::{
     aead::{Aead, Payload},
 };
 use http::HeaderValue;
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 use serde_json::json;
 use time::OffsetDateTime;
 use uuid::Uuid;
@@ -70,8 +70,9 @@ impl PaymentServiceProvider for WxPayJsapi {
         const API_PATH: &str = "/v3/pay/transactions/jsapi";
 
         let payer_openid = req.extras.remove("openid").unwrap();
+        let expire_at = req.expire_at;
 
-        let body = json!({
+        let mut body = json!({
             "appid": self.appid,
             "mchid": self.mchid,
             "description": req.description,
@@ -80,6 +81,10 @@ impl PaymentServiceProvider for WxPayJsapi {
             "amount": { "total": req.amount, "currency": "CNY" },
             "payer": { "openid": payer_openid }
         });
+
+        if let Some(expire_at) = expire_at {
+            body["time_expire"] = serde_json::to_value(Rfc3339Time(expire_at)).unwrap();
+        }
 
         let body_str = serde_json::to_string(&body).unwrap();
 
@@ -433,6 +438,9 @@ pub struct EncryptedResource {
     #[serde(default)]
     pub associated_data: String,
 }
+
+#[derive(Serialize)]
+struct Rfc3339Time(#[serde(with = "time::serde::rfc3339")] OffsetDateTime);
 
 impl EncryptedResource {
     pub fn decrypt(&self, key: &[u8]) -> Result<String, ()> {
