@@ -9,6 +9,7 @@ mod repo;
 mod svc;
 mod utils;
 
+pub use repo::PaymentQuery;
 pub use svc::PaymentService;
 
 #[repr(i16)]

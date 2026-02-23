@@ -95,13 +95,19 @@ pub struct RefundUpdate {
 pub trait PaymentRepository: Send + Sync {
     type Context;
 
-    async fn query_payments(
+    async fn query(
         &self,
         conn: &mut Self::Context,
         query: &PaymentQuery,
     ) -> Result<Vec<PaymentRecord>, sqlx::Error>;
 
-    async fn query_payment_optional(
+    async fn query_one(
+        &self,
+        conn: &mut Self::Context,
+        query: &PaymentQuery,
+    ) -> Result<Option<PaymentRecord>, sqlx::Error>;
+
+    async fn query_for_update_skip_locked(
         &self,
         conn: &mut Self::Context,
         query: &PaymentQuery,
@@ -152,7 +158,7 @@ pub struct PaymentRepo;
 impl PaymentRepository for PaymentRepo {
     type Context = PgConnection;
 
-    async fn query_payments(
+    async fn query(
         &self,
         conn: &mut Self::Context,
         query: &PaymentQuery,
@@ -177,7 +183,7 @@ impl PaymentRepository for PaymentRepo {
             .await
     }
 
-    async fn query_payment_optional(
+    async fn query_one(
         &self,
         conn: &mut Self::Context,
         query: &PaymentQuery,
@@ -196,6 +202,33 @@ impl PaymentRepository for PaymentRepo {
 
         builder.push(" ORDER BY created_at DESC");
         builder.push(" LIMIT 1");
+
+        builder
+            .build_query_as::<PaymentRecord>()
+            .fetch_optional(conn)
+            .await
+    }
+
+    async fn query_for_update_skip_locked(
+        &self,
+        conn: &mut Self::Context,
+        query: &PaymentQuery,
+    ) -> Result<Option<PaymentRecord>, sqlx::Error> {
+        let mut builder = sqlx::QueryBuilder::<'_, sqlx::Postgres>::new(
+            r#"
+            SELECT
+                id, provider_trade_no, amount, refunded_amount,
+                biz_id, provider, status, success_at, expire_at
+            FROM bokchoy.payments
+            WHERE 1=1
+            "#,
+        );
+
+        query.apply_filters(&mut builder);
+
+        builder.push(" ORDER BY created_at DESC");
+        builder.push(" LIMIT 1");
+        builder.push(" FOR UPDATE SKIP LOCKED");
 
         builder
             .build_query_as::<PaymentRecord>()

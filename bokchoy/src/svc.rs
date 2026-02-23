@@ -41,6 +41,30 @@ impl<C> PaymentService<C> {
         PaymentServiceBuilder::default()
     }
 
+    pub async fn query_payment(
+        &self,
+        conn: &mut C,
+        query: &PaymentQuery,
+    ) -> Result<Option<PaymentRecord>, sqlx::Error> {
+        self.repo.query_one(conn, query).await
+    }
+
+    pub async fn query_payments(
+        &self,
+        conn: &mut C,
+        query: &PaymentQuery,
+    ) -> Result<Vec<PaymentRecord>, sqlx::Error> {
+        self.repo.query(conn, query).await
+    }
+
+    pub async fn query_payment_for_update_skip_locked(
+        &self,
+        conn: &mut C,
+        query: &PaymentQuery,
+    ) -> Result<Option<PaymentRecord>, sqlx::Error> {
+        self.repo.query_for_update_skip_locked(conn, query).await
+    }
+
     pub async fn get_refunds_by_ids(
         &self,
         conn: &mut C,
@@ -54,14 +78,13 @@ impl<C> PaymentService<C> {
         conn: &mut C,
         biz_id: Uuid,
     ) -> Result<Vec<PaymentRecord>, sqlx::Error> {
-        self.repo
-            .query_payments(
-                conn,
-                &PaymentQuery::new()
-                    .biz_id(biz_id)
-                    .status(PaymentStatus::Success),
-            )
-            .await
+        self.query_payments(
+            conn,
+            &PaymentQuery::new()
+                .biz_id(biz_id)
+                .status(PaymentStatus::Success),
+        )
+        .await
     }
 
     pub async fn record_successful_payment(
@@ -131,7 +154,7 @@ impl<C> PaymentService<C> {
     pub async fn close_payment(&self, conn: &mut C, payment_id: Uuid) {
         let payment = self
             .repo
-            .query_payment_optional(conn, &PaymentQuery::new().id(payment_id))
+            .query_one(conn, &PaymentQuery::new().id(payment_id))
             .await
             .unwrap()
             .unwrap();
@@ -283,7 +306,7 @@ impl<C> PaymentService<C> {
 
         let payment = self
             .repo
-            .query_payment_optional(conn, &PaymentQuery::new().id(refund.payment_id))
+            .query_one(conn, &PaymentQuery::new().id(refund.payment_id))
             .await
             .unwrap()
             .unwrap();
@@ -311,7 +334,7 @@ impl<C> PaymentService<C> {
     ) -> RefundResponse {
         let payment = self
             .repo
-            .query_payment_optional(conn, &PaymentQuery::new().id(payment_id))
+            .query_one(conn, &PaymentQuery::new().id(payment_id))
             .await
             .unwrap()
             .unwrap();
