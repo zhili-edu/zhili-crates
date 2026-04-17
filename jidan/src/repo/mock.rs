@@ -86,6 +86,12 @@ impl super::OrderRepository for MockOrderRepository {
                 {
                     return false;
                 }
+                if let Some(ids) = query.ids
+                    && !ids.is_empty()
+                    && !ids.contains(&order.id)
+                {
+                    return false;
+                }
                 if let Some(user_id) = query.user_id
                     && order.user_id != user_id
                 {
@@ -183,6 +189,12 @@ impl super::OrderRepository for MockOrderRepository {
                 {
                     return false;
                 }
+                if let Some(ids) = query.ids
+                    && !ids.is_empty()
+                    && !ids.contains(&order.id)
+                {
+                    return false;
+                }
                 if let Some(user_id) = query.user_id
                     && order.user_id != user_id
                 {
@@ -260,6 +272,12 @@ impl super::OrderRepository for MockOrderRepository {
             .filter(|order| {
                 if let Some(id) = query.id
                     && order.id != id
+                {
+                    return false;
+                }
+                if let Some(ids) = query.ids
+                    && !ids.is_empty()
+                    && !ids.contains(&order.id)
                 {
                     return false;
                 }

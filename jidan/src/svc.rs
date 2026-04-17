@@ -951,6 +951,58 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn test_query_orders_with_ids_filter() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        let first_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let second_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let ids = [first_order_id, second_order_id];
+
+        let orders = service
+            .query_orders(&mut conn, &OrderQuery::new(10).ids(&ids))
+            .await
+            .unwrap();
+
+        assert_eq!(orders.len(), 2);
+        assert!(orders.iter().any(|order| order.id == first_order_id));
+        assert!(orders.iter().any(|order| order.id == second_order_id));
+    }
+
+    #[tokio::test]
+    async fn test_empty_ids_filter_is_ignored_when_other_filters_exist() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+
+        let empty_ids: [Uuid; 0] = [];
+
+        let orders = service
+            .query_orders(
+                &mut conn,
+                &OrderQuery::new(10)
+                    .ids(&empty_ids)
+                    .status(OrderStatus::Pending),
+            )
+            .await
+            .unwrap();
+
+        assert_eq!(orders.len(), 1);
+    }
+
+    #[tokio::test]
     async fn test_count_orders_with_status_filter() {
         let (service, _) = create_test_service();
         let user_id = Uuid::now_v7();
@@ -985,6 +1037,30 @@ mod tests {
         assert_eq!(pending_count, 1);
         assert_eq!(fulfilled_count, 1);
         assert_ne!(pending_order_id, fulfilled_order_id);
+    }
+
+    #[tokio::test]
+    async fn test_count_orders_with_ids_filter() {
+        let (service, _) = create_test_service();
+        let user_id = Uuid::now_v7();
+        let mut conn = ();
+
+        let included_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let _excluded_order_id = service
+            .create_order(create_test_order(user_id), &mut conn)
+            .await
+            .unwrap();
+        let ids = [included_order_id];
+
+        let count = service
+            .count_orders(&mut conn, &OrderQuery::new(10).ids(&ids))
+            .await
+            .unwrap();
+
+        assert_eq!(count, 1);
     }
 
     #[tokio::test]

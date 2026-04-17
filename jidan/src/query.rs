@@ -5,6 +5,7 @@ use uuid::Uuid;
 #[derive(Debug, Clone)]
 pub struct OrderQuery<'a> {
     pub id: Option<Uuid>,
+    pub ids: Option<&'a [Uuid]>,
     pub user_id: Option<Uuid>,
     pub status: Option<crate::OrderStatus>,
     pub expired: Option<bool>,
@@ -25,6 +26,7 @@ impl<'a> OrderQuery<'a> {
 
         Self {
             id: None,
+            ids: None,
             user_id: None,
             status: None,
             expired: None,
@@ -42,6 +44,11 @@ impl<'a> OrderQuery<'a> {
 
     pub fn id(mut self, id: Uuid) -> Self {
         self.id = Some(id);
+        self
+    }
+
+    pub fn ids(mut self, ids: &'a [Uuid]) -> Self {
+        self.ids = Some(ids);
         self
     }
 
@@ -123,6 +130,7 @@ impl<'a> OrderQuery<'a> {
 
     pub fn has_effective_filters(&self) -> bool {
         self.id.is_some()
+            || self.ids.is_some_and(|ids| !ids.is_empty())
             || self.user_id.is_some()
             || self.status.is_some()
             || self.expired.is_some()
