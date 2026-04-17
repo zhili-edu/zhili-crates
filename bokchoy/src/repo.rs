@@ -11,6 +11,7 @@ use crate::{
 pub struct PaymentQuery {
     id: Option<Uuid>,
     biz_id: Option<Uuid>,
+    biz_ids: Option<Vec<Uuid>>,
     status: Option<PaymentStatus>,
 }
 
@@ -29,6 +30,16 @@ impl PaymentQuery {
         self
     }
 
+    pub fn biz_ids(mut self, biz_ids: impl IntoIterator<Item = Uuid>) -> Self {
+        let biz_ids: Vec<Uuid> = biz_ids.into_iter().collect();
+        self.biz_ids = if biz_ids.is_empty() {
+            None
+        } else {
+            Some(biz_ids)
+        };
+        self
+    }
+
     pub fn status(mut self, status: PaymentStatus) -> Self {
         self.status = Some(status);
         self
@@ -36,7 +47,10 @@ impl PaymentQuery {
 }
 
 impl PaymentQuery {
-    pub(crate) fn apply_filters(&self, builder: &mut sqlx::QueryBuilder<'_, sqlx::Postgres>) {
+    pub(crate) fn apply_filters<'a>(
+        &'a self,
+        builder: &mut sqlx::QueryBuilder<'a, sqlx::Postgres>,
+    ) {
         if let Some(id) = self.id {
             builder.push(" AND id = ");
             builder.push_bind(id);
@@ -44,6 +58,11 @@ impl PaymentQuery {
         if let Some(biz_id) = self.biz_id {
             builder.push(" AND biz_id = ");
             builder.push_bind(biz_id);
+        }
+        if let Some(biz_ids) = &self.biz_ids {
+            builder.push(" AND biz_id = ANY(");
+            builder.push_bind(biz_ids.as_slice());
+            builder.push(")");
         }
         if let Some(status) = self.status {
             builder.push(" AND status = ");
@@ -394,5 +413,55 @@ impl PaymentRepository for PaymentRepo {
         .bind(info.success_at)
         .fetch_optional(conn)
         .await
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use sqlx::QueryBuilder;
+    use uuid::Uuid;
+
+    use super::PaymentQuery;
+    use crate::PaymentStatus;
+
+    #[test]
+    fn apply_filters_supports_biz_ids() {
+        let biz_ids = vec![Uuid::now_v7(), Uuid::now_v7()];
+        let mut builder = QueryBuilder::<sqlx::Postgres>::new("SELECT 1 WHERE 1=1");
+        let query = PaymentQuery::new().biz_ids(biz_ids);
+
+        query.apply_filters(&mut builder);
+
+        assert_eq!(builder.sql(), "SELECT 1 WHERE 1=1 AND biz_id = ANY($1)");
+    }
+
+    #[test]
+    fn apply_filters_ignores_empty_biz_ids() {
+        let mut builder = QueryBuilder::<sqlx::Postgres>::new("SELECT 1 WHERE 1=1");
+        let query = PaymentQuery::new()
+            .biz_ids(Vec::new())
+            .status(PaymentStatus::Success);
+
+        query.apply_filters(&mut builder);
+
+        assert_eq!(builder.sql(), "SELECT 1 WHERE 1=1 AND status = $1");
+    }
+
+    #[test]
+    fn apply_filters_combines_biz_id_biz_ids_and_status() {
+        let biz_id = Uuid::now_v7();
+        let biz_ids = vec![biz_id, Uuid::now_v7()];
+        let mut builder = QueryBuilder::<sqlx::Postgres>::new("SELECT 1 WHERE 1=1");
+        let query = PaymentQuery::new()
+            .biz_id(biz_id)
+            .biz_ids(biz_ids)
+            .status(PaymentStatus::Success);
+
+        query.apply_filters(&mut builder);
+
+        assert_eq!(
+            builder.sql(),
+            "SELECT 1 WHERE 1=1 AND biz_id = $1 AND biz_id = ANY($2) AND status = $3"
+        );
     }
 }
