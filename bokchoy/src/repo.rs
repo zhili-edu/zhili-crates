@@ -77,6 +77,7 @@ pub struct PaymentCreate {
     pub amount: i64,
     pub biz_id: Uuid,
     pub provider: Provider,
+    pub provider_info: serde_json::Value,
     pub provider_trade_no: Option<String>,
     pub success_at: Option<time::OffsetDateTime>,
     pub expire_at: Option<time::OffsetDateTime>,
@@ -102,6 +103,8 @@ pub struct RefundCreate {
     pub amount: i64,
     pub reason: Option<String>,
     pub status: RefundStatus,
+    pub provider_refund_no: Option<String>,
+    pub success_at: Option<time::OffsetDateTime>,
 }
 
 pub struct RefundUpdate {
@@ -186,7 +189,7 @@ impl PaymentRepository for PaymentRepo {
             r#"
             SELECT
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at, expire_at
+                biz_id, provider, provider_info, status, success_at, expire_at
             FROM bokchoy.payments
             WHERE 1=1
             "#,
@@ -211,7 +214,7 @@ impl PaymentRepository for PaymentRepo {
             r#"
             SELECT
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at, expire_at
+                biz_id, provider, provider_info, status, success_at, expire_at
             FROM bokchoy.payments
             WHERE 1=1
             "#,
@@ -237,7 +240,7 @@ impl PaymentRepository for PaymentRepo {
             r#"
             SELECT
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at, expire_at
+                biz_id, provider, provider_info, status, success_at, expire_at
             FROM bokchoy.payments
             WHERE 1=1
             "#,
@@ -264,13 +267,13 @@ impl PaymentRepository for PaymentRepo {
             r#"
             INSERT INTO bokchoy.payments (
                 provider_trade_no, description, status, amount, refunded_amount,
-                biz_id, provider,
+                biz_id, provider, provider_info,
                 created_at, updated_at, success_at, expire_at
             )
             VALUES (
                 $1, $2, $3, $4, $5,
-                $6, $7,
-                now(), now(), $8, $9
+                $6, $7, $8,
+                now(), now(), $9, $10
             )
             RETURNING id
             "#,
@@ -282,6 +285,7 @@ impl PaymentRepository for PaymentRepo {
         .bind(0)
         .bind(info.biz_id)
         .bind(info.provider)
+        .bind(info.provider_info)
         .bind(info.success_at)
         .bind(info.expire_at)
         .fetch_one(conn)
@@ -306,7 +310,7 @@ impl PaymentRepository for PaymentRepo {
             WHERE id = $1
             RETURNING
                 id, provider_trade_no, amount, refunded_amount,
-                biz_id, provider, status, success_at, expire_at
+                biz_id, provider, provider_info, status, success_at, expire_at
             "#,
         )
         .bind(id)
@@ -368,23 +372,25 @@ impl PaymentRepository for PaymentRepo {
         sqlx::query_scalar::<sqlx::Postgres, Uuid>(
             r#"
             INSERT INTO bokchoy.refunds (
-                id, payment_id,
+                id, payment_id, provider_refund_no,
                 amount, reason, status,
-                created_at, updated_at
+                created_at, updated_at, success_at
             )
             VALUES (
-                $1, $2,
-                $3, $4, $5,
-                now(), now()
+                $1, $2, $3,
+                $4, $5, $6,
+                now(), now(), $7
             )
             RETURNING id
             "#,
         )
         .bind(info.id)
         .bind(info.payment_id)
+        .bind(info.provider_refund_no)
         .bind(info.amount)
         .bind(info.reason)
         .bind(info.status)
+        .bind(info.success_at)
         .fetch_one(conn)
         .await
     }

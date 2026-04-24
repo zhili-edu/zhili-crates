@@ -17,6 +17,7 @@ pub use svc::PaymentService;
 pub enum Provider {
     WxpayJsapi = 0,
     WxpayNative = 1,
+    Cash = 100,
 }
 
 impl sqlx::Type<sqlx::Postgres> for Provider {
@@ -48,6 +49,7 @@ impl<'r> sqlx::Decode<'r, sqlx::Postgres> for Provider {
         match val {
             0 => Ok(Provider::WxpayJsapi),
             1 => Ok(Provider::WxpayNative),
+            100 => Ok(Provider::Cash),
             _ => Err(format!("Invalid Provider value: {}", val).into()),
         }
     }
@@ -156,6 +158,26 @@ pub struct RecordSuccessfulPaymentRequest {
 }
 
 #[derive(Debug, Clone)]
+pub struct RecordCashPaymentRequest {
+    pub description: String,
+    pub amount: i64,
+    pub biz_id: Uuid,
+    pub receipt_no: Option<String>,
+    pub collected_at: time::OffsetDateTime,
+    pub operator_id: Option<Uuid>,
+    pub note: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+pub struct RecordCashRefundRequest {
+    pub payment_id: Uuid,
+    pub amount: i64,
+    pub reason: Option<String>,
+    pub refund_no: Option<String>,
+    pub refunded_at: time::OffsetDateTime,
+}
+
+#[derive(Debug, Clone)]
 pub struct PayCallbackResult {
     pub payment_id: Uuid,
     pub biz_id: Uuid,
@@ -184,6 +206,7 @@ pub struct PaymentRecord {
     pub refunded_amount: i64,
     pub biz_id: Uuid,
     pub provider: Provider,
+    pub provider_info: serde_json::Value,
     pub status: PaymentStatus,
     pub success_at: Option<time::OffsetDateTime>,
     pub expire_at: Option<time::OffsetDateTime>,
